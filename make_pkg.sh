@@ -18,6 +18,9 @@ APP_TMP="/tmp/${APP_NAME}_notarize/$APP_NAME.app"
 WORK="/tmp/${APP_NAME}_pkg_work"
 DIST_DIR="$ROOT/dist"
 PKG_SIGNED="$DIST_DIR/${APP_NAME}_${VERSION}.pkg"
+# バージョン番号なしのコピー。GitHub Releasesにこのファイル名でアップロードすると
+# releases/latest/download/LUFSBar.pkg が常に最新版を指すようになる(LP側もこのURLを使用)。
+PKG_LATEST="$DIST_DIR/${APP_NAME}.pkg"
 
 echo "=========================================="
 echo "  LUFSBar  make_pkg.sh  (v${VERSION})"
@@ -77,12 +80,20 @@ xcrun stapler staple "$PKG_SIGNED"
 xcrun stapler validate "$PKG_SIGNED"
 
 # ---- Step 4: 検証 ----
-echo "[4/4] verify ..."
+echo "[4/5] verify ..."
 spctl -a -vvv -t install "$PKG_SIGNED" || true
 pkgutil --check-signature "$PKG_SIGNED"
+
+# ---- Step 5: バージョン無しコピーを作成(GitHub Releasesアップロード用) ----
+#   署名済み・staple済みファイルをそのままコピーするだけなので、
+#   コピー後も署名/公証チケットはそのまま有効。
+echo "[5/5] copy version-less release asset ..."
+cp "$PKG_SIGNED" "$PKG_LATEST"
+pkgutil --check-signature "$PKG_LATEST"
 
 echo ""
 echo "=========================================="
 echo "  .pkg 完成！"
-echo "  $PKG_SIGNED"
+echo "  アーカイブ用: $PKG_SIGNED"
+echo "  リリースアップロード用: $PKG_LATEST"
 echo "=========================================="
