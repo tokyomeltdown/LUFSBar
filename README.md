@@ -2,7 +2,7 @@
 
 **Every sound on your Mac, measured.**
 
-LUFSBar is a free, open-source loudness meter that lives in your macOS menu bar. It measures everything playing on your Mac — Spotify, Apple Music, YouTube, your DAW — in real time, with no BlackHole, no Loopback, no virtual audio device setup.
+LUFSBar is a free, open-source loudness meter that lives in your macOS menu bar. It measures everything playing on your Mac — Apple Music, Spotify, YouTube, your DAW — in real time, with no BlackHole, no Loopback, no virtual audio device setup.
 
 [日本語のREADMEはこちら / Japanese README](README.ja.md)
 
@@ -53,4 +53,4 @@ MIT — see [LICENSE](LICENSE). Bundled [libebur128](https://github.com/jiixyj/l
 
 ---
 
-Made by [tokyomeltdown](https://tokyomeltdownjp.booth.pm/) — also check out **RefMatch**, a free reference A/B loudness-matching plugin (VST3/AU/AAX).
+Made by [tokyomeltdown](https://x.com/tokyomeltdownJP)

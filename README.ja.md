@@ -2,7 +2,7 @@
 
 **Macで鳴る全ての音に、物差しを。**
 
-LUFSBarは、macOSのメニューバーに常駐する無料・オープンソースのラウドネスメーターです。Spotify、Apple Music、YouTube、DAWの出力——Macで再生されている音すべてをリアルタイムに計測します。BlackHoleもLoopbackも仮想オーディオデバイスの設定も不要です。
+LUFSBarは、macOSのメニューバーに常駐する無料・オープンソースのラウドネスメーターです。Apple Music、Spotify、YouTube、DAWの出力——Macで再生されている音すべてをリアルタイムに計測します。BlackHoleもLoopbackも仮想オーディオデバイスの設定も不要です。
 
 [English README](README.md)
 
@@ -53,4 +53,4 @@ MIT — [LICENSE](LICENSE) 参照。同梱の [libebur128](https://github.com/ji
 
 ---
 
-制作: [tokyomeltdown](https://tokyomeltdownjp.booth.pm/) — 無料のリファレンスA/Bラウドネスマッチ プラグイン **RefMatch**（VST3/AU/AAX）も公開中です。
+制作: [tokyomeltdown](https://x.com/tokyomeltdownJP)
