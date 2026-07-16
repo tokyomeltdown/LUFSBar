@@ -1,0 +1,10 @@
+.DS_Store
+xcuserdata/
+*.xcuserstate
+build/
+DerivedData/
+dist/
+*.zip
+
+# 内部の戦略・開発メモ(競合分析・Apple Developer Team IDを含む、非公開)
+LUFSBar_Handoff.md

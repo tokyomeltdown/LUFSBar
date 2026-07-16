@@ -1,0 +1,384 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3A5E24D7622F47C09BCF4D93 /* LUFSBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC38836644F4DB1BB8CF98C /* LUFSBarApp.swift */; };
+		A44482C038744818AB34EB8D /* SystemAudioTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720C2B0DCEB149479C83B29B /* SystemAudioTap.swift */; };
+		4EFF0A1856EF4D42BC131564 /* LoudnessMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D591030ABECF47D6AA4C91D1 /* LoudnessMeter.swift */; };
+		1C2B753211B94B99832DBB58 /* MeterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BA901D4CF24B1CACBEAA9C /* MeterState.swift */; };
+		C49F5F8E0F874BD2879EEB0A /* ebur128.c in Sources */ = {isa = PBXBuildFile; fileRef = F8DC8AE58931462F8E9F3896 /* ebur128.c */; };
+		C5B128595E84445594BA8CE9 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6257FAAFA8F14C8E9F87B30C /* PopoverContentView.swift */; };
+		6DD2B2DE8EA9431FA2666B14 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A8ECB9786748FDA9AB0B81 /* LaunchAtLogin.swift */; };
+		6357354B98F64D938BE54F25 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231300554E7D4A3EAFE6F8D2 /* SettingsView.swift */; };
+		B6EED5FB73524B088FE0BB81 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0AFAC7794FF84F01A5F0F54C /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		750345A92121407096CDEDD6 /* LUFSBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LUFSBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CEC38836644F4DB1BB8CF98C /* LUFSBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUFSBarApp.swift; sourceTree = "<group>"; };
+		720C2B0DCEB149479C83B29B /* SystemAudioTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioTap.swift; sourceTree = "<group>"; };
+		0FFC5A79053645E6B28A2D8E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B1A2C3D4E5F647890A1B2C3D /* LUFSBar.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LUFSBar.entitlements; sourceTree = "<group>"; };
+		D591030ABECF47D6AA4C91D1 /* LoudnessMeter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoudnessMeter.swift; sourceTree = "<group>"; };
+		80BA901D4CF24B1CACBEAA9C /* MeterState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterState.swift; sourceTree = "<group>"; };
+		C4446168E139411483EDBF24 /* LUFSBar-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "LUFSBar-Bridging-Header.h"; sourceTree = "<group>"; };
+		F8DC8AE58931462F8E9F3896 /* ebur128.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ebur128.c; sourceTree = "<group>"; };
+		B5E3AA65F9904DBC8CBD7882 /* ebur128.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ebur128.h; sourceTree = "<group>"; };
+		B8DDBCFC37C14AC2BF635891 /* queue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "queue/sys/queue.h"; sourceTree = "<group>"; };
+		32A6D9AFB7B4473B8F3E7042 /* COPYING */ = {isa = PBXFileReference; lastKnownFileType = text; path = COPYING; sourceTree = "<group>"; };
+		6257FAAFA8F14C8E9F87B30C /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
+		F5A8ECB9786748FDA9AB0B81 /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
+		231300554E7D4A3EAFE6F8D2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		0AFAC7794FF84F01A5F0F54C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E7F30E409B99490FB048D928 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		4E8DE95D1E90438F9BFD6428 = {
+			isa = PBXGroup;
+			children = (
+				20B5F6D3633046F6ADF8E3DF /* LUFSBar */,
+				E027A2AF016F4AE1BB099FB9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		20B5F6D3633046F6ADF8E3DF /* LUFSBar */ = {
+			isa = PBXGroup;
+			children = (
+				CEC38836644F4DB1BB8CF98C /* LUFSBarApp.swift */,
+				720C2B0DCEB149479C83B29B /* SystemAudioTap.swift */,
+				D591030ABECF47D6AA4C91D1 /* LoudnessMeter.swift */,
+				80BA901D4CF24B1CACBEAA9C /* MeterState.swift */,
+				6257FAAFA8F14C8E9F87B30C /* PopoverContentView.swift */,
+				F5A8ECB9786748FDA9AB0B81 /* LaunchAtLogin.swift */,
+				231300554E7D4A3EAFE6F8D2 /* SettingsView.swift */,
+				0AFAC7794FF84F01A5F0F54C /* Assets.xcassets */,
+				C4446168E139411483EDBF24 /* LUFSBar-Bridging-Header.h */,
+				0FFC5A79053645E6B28A2D8E /* Info.plist */,
+				B1A2C3D4E5F647890A1B2C3D /* LUFSBar.entitlements */,
+				BFAF08D18F794473B492787E /* libebur128 */,
+			);
+			path = LUFSBar;
+			sourceTree = "<group>";
+		};
+		BFAF08D18F794473B492787E /* libebur128 */ = {
+			isa = PBXGroup;
+			children = (
+				F8DC8AE58931462F8E9F3896 /* ebur128.c */,
+				B5E3AA65F9904DBC8CBD7882 /* ebur128.h */,
+				B8DDBCFC37C14AC2BF635891 /* queue.h */,
+				32A6D9AFB7B4473B8F3E7042 /* COPYING */,
+			);
+			path = libebur128;
+			sourceTree = "<group>";
+		};
+		E027A2AF016F4AE1BB099FB9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				750345A92121407096CDEDD6 /* LUFSBar.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3E8F6397C47B4580888C5416 /* LUFSBar */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2F4AECC736AA4B1DB36F28F6 /* Build configuration list for PBXNativeTarget "LUFSBar" */;
+			buildPhases = (
+				6E50FD784B2244E59928D84B /* Sources */,
+				E7F30E409B99490FB048D928 /* Frameworks */,
+				D34557334B0A47D99ECF6E65 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LUFSBar;
+			productName = LUFSBar;
+			productReference = 750345A92121407096CDEDD6 /* LUFSBar.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5C8B6A1F5CC5446B802709CD /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					3E8F6397C47B4580888C5416 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = B9E5BA551E4E40809989CD88 /* Build configuration list for PBXProject "LUFSBar" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 4E8DE95D1E90438F9BFD6428;
+			productRefGroup = E027A2AF016F4AE1BB099FB9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3E8F6397C47B4580888C5416 /* LUFSBar */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D34557334B0A47D99ECF6E65 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B6EED5FB73524B088FE0BB81 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6E50FD784B2244E59928D84B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3A5E24D7622F47C09BCF4D93 /* LUFSBarApp.swift in Sources */,
+				A44482C038744818AB34EB8D /* SystemAudioTap.swift in Sources */,
+				4EFF0A1856EF4D42BC131564 /* LoudnessMeter.swift in Sources */,
+				1C2B753211B94B99832DBB58 /* MeterState.swift in Sources */,
+				C49F5F8E0F874BD2879EEB0A /* ebur128.c in Sources */,
+				C5B128595E84445594BA8CE9 /* PopoverContentView.swift in Sources */,
+				6DD2B2DE8EA9431FA2666B14 /* LaunchAtLogin.swift in Sources */,
+				6357354B98F64D938BE54F25 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		00FE52DCE5434835B260B1F3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		BB8FBDEFCBA14C6BB39CD722 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "arm64 x86_64";
+				ONLY_ACTIVE_ARCH = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.4;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A5AC616470CE4FF987852848 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = LUFSBar/LUFSBar.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WDFKYGRKRW;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/LUFSBar/libebur128",
+					"$(SRCROOT)/LUFSBar/libebur128/queue",
+				);
+				INFOPLIST_FILE = LUFSBar/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tokyomeltdown.lufsbar;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "LUFSBar/LUFSBar-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		38E12AE5C2AE4A4C83B9ABF9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "arm64 x86_64";
+				ONLY_ACTIVE_ARCH = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_ENTITLEMENTS = LUFSBar/LUFSBar.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WDFKYGRKRW;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/LUFSBar/libebur128",
+					"$(SRCROOT)/LUFSBar/libebur128/queue",
+				);
+				INFOPLIST_FILE = LUFSBar/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tokyomeltdown.lufsbar;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "LUFSBar/LUFSBar-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B9E5BA551E4E40809989CD88 /* Build configuration list for PBXProject "LUFSBar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				00FE52DCE5434835B260B1F3 /* Debug */,
+				BB8FBDEFCBA14C6BB39CD722 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2F4AECC736AA4B1DB36F28F6 /* Build configuration list for PBXNativeTarget "LUFSBar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A5AC616470CE4FF987852848 /* Debug */,
+				38E12AE5C2AE4A4C83B9ABF9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 5C8B6A1F5CC5446B802709CD /* Project object */;
+}

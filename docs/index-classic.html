@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LUFSBar — Every sound on your Mac, measured.</title>
+<meta name="description" content="LUFSBar is a free, open-source LUFS loudness meter for the macOS menu bar. Measures Spotify, Apple Music, YouTube and your DAW in real time — no BlackHole, no virtual audio devices.">
+<meta property="og:title" content="LUFSBar — Every sound on your Mac, measured.">
+<meta property="og:description" content="Free, open-source LUFS loudness meter for the macOS menu bar. No BlackHole, no virtual audio devices.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0e1018">
+<link rel="icon" href="icon.png">
+<style>
+:root{--bg:#0e1018;--bg2:#151928;--card:#1a1f33;--border:#2a3050;--text:#e8ecf8;--muted:#8b93b0;--accent:#5eead4;--accent2:#34d399;--warn:#f59e0b;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Hiragino Sans","Noto Sans JP",sans-serif;line-height:1.7;}
+a{color:var(--accent);text-decoration:none;}
+.wrap{max-width:880px;margin:0 auto;padding:0 24px;}
+nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0;}
+nav .brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--text);font-size:17px;}
+nav .brand img{width:28px;height:28px;border-radius:7px;}
+nav .right{display:flex;align-items:center;gap:14px;}
+.langbtn{background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:13px;}
+.langbtn.active{color:var(--text);border-color:var(--accent);}
+.btn{display:inline-block;background:var(--accent);color:#06281f;font-weight:700;padding:12px 26px;border-radius:10px;font-size:15px;}
+.btn:hover{opacity:.9;}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border);font-weight:600;}
+.hero{text-align:center;padding:64px 0 48px;}
+.hero img{width:96px;height:96px;border-radius:22px;margin-bottom:24px;}
+h1{font-size:clamp(28px,5vw,44px);line-height:1.3;font-weight:800;letter-spacing:-.02em;}
+.hero p.sub{color:var(--muted);font-size:17px;max-width:560px;margin:18px auto 30px;}
+.hero .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:18px;}
+.meta{color:var(--muted);font-size:13px;letter-spacing:.02em;}
+.menubar-demo{margin:44px auto 0;max-width:420px;background:#1c1f2a;border:1px solid var(--border);border-radius:10px;padding:10px 16px;display:flex;justify-content:flex-end;align-items:center;gap:14px;font-size:14px;}
+.menubar-demo .val{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent);}
+.menubar-demo .ic{color:var(--muted);}
+section{padding:56px 0;}
+h2{font-size:26px;font-weight:700;margin-bottom:8px;}
+.lead{color:var(--muted);margin-bottom:32px;max-width:640px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;}
+.card h3{font-size:16px;margin-bottom:8px;}
+.card p{color:var(--muted);font-size:14px;}
+.card .tag{display:inline-block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
+.sec-alt{background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+ul.plain{list-style:none;}
+ul.plain li{padding:6px 0;color:var(--muted);}
+ul.plain li::before{content:"—";color:var(--accent);margin-right:10px;}
+code{background:#10131f;border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:13px;color:var(--accent);font-family:ui-monospace,Menlo,monospace;}
+.forecast{margin-top:22px;background:#10131f;border:1px solid var(--border);border-radius:12px;padding:18px 22px;max-width:380px;font-family:ui-monospace,Menlo,monospace;font-size:14px;}
+.forecast .row{display:flex;justify-content:space-between;padding:4px 0;}
+.forecast .row span:last-child{color:var(--warn);}
+.forecast .row.ok span:last-child{color:var(--accent2);}
+footer{padding:48px 0 64px;color:var(--muted);font-size:14px;}
+footer .links{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:24px;}
+.lang-ja{display:none;}
+body.ja .lang-ja{display:block;}
+body.ja .lang-en{display:none;}
+span.lang-ja,a.lang-ja{display:none;}
+body.ja span.lang-ja,body.ja a.lang-ja{display:inline;}
+body.ja span.lang-en,body.ja a.lang-en{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <div class="brand"><img src="icon.png" alt=""><span>LUFSBar</span></div>
+  <div class="right">
+    <button class="langbtn" id="btn-en" onclick="setLang('en')">EN</button>
+    <button class="langbtn" id="btn-ja" onclick="setLang('ja')">JA</button>
+    <a class="btn" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest" style="padding:8px 18px;font-size:14px;"><span class="lang-en">Download</span><span class="lang-ja">ダウンロード</span></a>
+  </div>
+</nav>
+
+<header class="hero">
+  <img src="icon.png" alt="LUFSBar icon">
+  <div class="lang-en">
+    <h1>Every sound on your Mac,<br>measured.</h1>
+    <p class="sub"><strong>A free LUFS loudness meter in your menu bar.</strong> Spotify, Apple Music, YouTube, your DAW — measured in real time. No BlackHole. No virtual audio devices.</p>
+  </div>
+  <div class="lang-ja">
+    <h1>Macで鳴る全ての音に、<br>物差しを。</h1>
+    <p class="sub"><strong>メニューバーに常駐する無料のLUFSメーター。</strong> Spotify、Apple Music、YouTube、DAWの出力をリアルタイム計測。BlackHoleも仮想オーディオデバイスも不要。</p>
+  </div>
+  <div class="cta">
+    <a class="btn" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest"><span class="lang-en">Download for Mac</span><span class="lang-ja">Macにダウンロード</span></a>
+    <a class="btn ghost" href="https://github.com/tokyomeltdown/LUFSBar">GitHub</a>
+  </div>
+  <p class="meta">macOS 14.4+ · Apple silicon &amp; Intel · Signed &amp; notarized · Free &amp; open source (MIT)</p>
+  <div class="menubar-demo"><span class="val">-14.6 LUFS</span><span class="ic">◐</span><span class="ic">⌁</span><span class="ic">100%</span></div>
+</header>
+
+<section>
+  <div class="lang-en">
+    <h2>The loudness of everything, at a glance</h2>
+    <p class="lead">Every sound your Mac plays passes through one mix — but nobody is watching it. LUFSBar taps the system audio and shows Momentary, Short-term, Integrated LUFS and True Peak, right where you can always see them.</p>
+  </div>
+  <div class="lang-ja">
+    <h2>すべての音のラウドネスを、ひと目で</h2>
+    <p class="lead">Macで再生される音はすべて1つのミックスを通っているのに、誰もそれを見ていません。LUFSBarはシステム音声を直接計測し、Momentary / Short-term / Integrated LUFS と True Peak を、いつでも見える場所に表示します。</p>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <span class="tag"><span class="lang-en">Mix engineers</span><span class="lang-ja">ミックスエンジニア</span></span>
+      <h3><span class="lang-en">Check references without leaving your DAW</span><span class="lang-ja">DAWから出ずにリファレンス確認</span></h3>
+      <p><span class="lang-en">Play a reference on any streaming service and read its loudness instantly — no bouncing, no importing.</span><span class="lang-ja">配信サービスでリファレンス曲を再生するだけでラウドネスが読める。バウンスも読み込みも不要。</span></p>
+    </div>
+    <div class="card">
+      <span class="tag"><span class="lang-en">Reference snapshot</span><span class="lang-ja">リファレンス保存</span></span>
+      <h3><span class="lang-en">Save it, then compare your mix</span><span class="lang-ja">保存して、自分のミックスと比較</span></h3>
+      <p><span class="lang-en">One click captures the reference's LUFS &amp; True Peak. Your mix's delta is shown live.</span><span class="lang-ja">ワンクリックでリファレンスのLUFSとTrue Peakを保存。自分のミックスとの差分をライブ表示。</span></p>
+    </div>
+    <div class="card">
+      <span class="tag"><span class="lang-en">Streaming forecast</span><span class="lang-ja">配信ノーマライズ予測</span></span>
+      <h3><span class="lang-en">Know your turn-down before you upload</span><span class="lang-ja">アップ前に「何dB下げられるか」</span></h3>
+      <p><span class="lang-en">See exactly how much Apple Music, Spotify and YouTube will normalize your track.</span><span class="lang-ja">Apple Music・Spotify・YouTubeでどれだけ音量調整されるかを事前に表示。</span></p>
+    </div>
+    <div class="card">
+      <span class="tag"><span class="lang-en">Podcasters &amp; streamers</span><span class="lang-ja">配信者・ポッドキャスター</span></span>
+      <h3><span class="lang-en">Hit your loudness target</span><span class="lang-ja">ラウドネス基準を外さない</span></h3>
+      <p><span class="lang-en">Keep your program at a consistent, platform-ready loudness while you work.</span><span class="lang-ja">作業しながら、番組のラウドネスをプラットフォーム基準にキープ。</span></p>
+    </div>
+  </div>
+  <div class="forecast">
+    <div class="row"><span>Apple Music</span><span>-1.2 dB</span></div>
+    <div class="row"><span>Spotify</span><span>-3.2 dB</span></div>
+    <div class="row ok"><span>YouTube</span><span>OK</span></div>
+  </div>
+</section>
+
+<section class="sec-alt">
+ <div class="wrap" style="padding:0;">
+  <div class="lang-en">
+    <h2>Transparent by design</h2>
+    <p class="lead">LUFSBar is a small app that does one thing. You can verify everything it does.</p>
+  </div>
+  <div class="lang-ja">
+    <h2>設計から透明</h2>
+    <p class="lead">LUFSBarは1つのことだけをする小さなアプリです。その挙動はすべて検証できます。</p>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h3><span class="lang-en">No network, no telemetry</span><span class="lang-ja">通信なし・テレメトリなし</span></h3>
+      <p><span class="lang-en">Audio is analyzed in memory and never recorded to disk. No accounts, no tracking, no requests.</span><span class="lang-ja">音声はメモリ上で解析されるだけで、録音・保存は一切しません。アカウント不要・追跡なし。</span></p>
+    </div>
+    <div class="card">
+      <h3><span class="lang-en">Standards-compliant metering</span><span class="lang-ja">標準規格準拠の計測</span></h3>
+      <p><span class="lang-en">ITU-R BS.1770-4 / EBU R128 via <a href="https://github.com/jiixyj/libebur128">libebur128</a>: K-weighting, gating, 4× oversampled True Peak.</span><span class="lang-ja"><a href="https://github.com/jiixyj/libebur128">libebur128</a>によるITU-R BS.1770-4 / EBU R128準拠。K特性・ゲーティング・4倍オーバーサンプリングTrue Peak。</span></p>
+    </div>
+    <div class="card">
+      <h3><span class="lang-en">100% open source</span><span class="lang-ja">完全オープンソース</span></h3>
+      <p><span class="lang-en">MIT licensed. Read the source, build it yourself, or file an issue on GitHub.</span><span class="lang-ja">MITライセンス。ソースを読むのも、自分でビルドするのも、Issueを立てるのも自由です。</span></p>
+    </div>
+  </div>
+  <p style="margin-top:26px;color:var(--muted);font-size:14px;">
+    <span class="lang-en">macOS will ask once for <strong>System Audio Recording</strong> permission — that's the only access LUFSBar needs. It also registers as a login item on first launch so your meter is always there; turn it off anytime and it will never re-enable itself.</span>
+    <span class="lang-ja">初回に一度だけ「<strong>システムオーディオ録音</strong>」の許可を求めます。LUFSBarが必要とするのはそれだけです。また初回起動時にログイン項目へ登録されます（メーターを常に使えるように）。いつでもオフにでき、勝手にオンへ戻すことはありません。</span>
+  </p>
+ </div>
+</section>
+
+<section style="text-align:center;">
+  <div class="lang-en"><h2>Put a meter where you'll actually see it</h2></div>
+  <div class="lang-ja"><h2>いつも見える場所に、メーターを</h2></div>
+  <div class="cta" style="display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap;">
+    <a class="btn" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest"><span class="lang-en">Download for Mac — Free</span><span class="lang-ja">無料でダウンロード</span></a>
+  </div>
+  <p class="meta" style="margin-top:14px;">LUFSBar_1.1.pkg · Signed &amp; notarized</p>
+</section>
+
+<footer>
+  <div class="links">
+    <a href="https://github.com/tokyomeltdown/LUFSBar">GitHub</a>
+    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/README.md">README</a>
+    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/README.ja.md">README（日本語）</a>
+    <a href="https://tokyomeltdownjp.booth.pm/">tokyomeltdown</a>
+  </div>
+  <p>© 2026 tokyomeltdown · MIT License</p>
+</footer>
+</div>
+<script>
+function setLang(l){
+  document.body.classList.toggle('ja', l==='ja');
+  document.getElementById('btn-en').classList.toggle('active', l==='en');
+  document.getElementById('btn-ja').classList.toggle('active', l==='ja');
+  try{localStorage.setItem('lufsbar-lang', l);}catch(e){}
+  document.documentElement.lang = l;
+}
+(function(){
+  var saved=null;
+  try{saved=localStorage.getItem('lufsbar-lang');}catch(e){}
+  var l = saved || ((navigator.language||'').indexOf('ja')===0 ? 'ja' : 'en');
+  setLang(l);
+})();
+</script>
+</body>
+</html>
