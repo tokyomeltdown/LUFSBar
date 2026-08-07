@@ -56,6 +56,7 @@ h2{font-size:clamp(28px,4.5vw,44px);font-weight:700;letter-spacing:-.02em;line-h
 .bcard{background:var(--card);border-radius:24px;padding:34px 30px;grid-column:span 3;transition:transform .3s ease;}
 .bcard:hover{transform:translateY(-3px);}
 .bcard.wide{grid-column:span 6;}
+.bcard.third{grid-column:span 2;}
 .bcard.dark{background:var(--dark);color:#f5f5f7;}
 .bcard.dark p{color:#a1a1aa;}
 .bcard .k{font-size:13px;font-weight:600;color:var(--blue);letter-spacing:.02em;text-transform:uppercase;margin-bottom:12px;}
@@ -86,7 +87,7 @@ body.ja .lang-en{display:none;}
 span.lang-ja,a.lang-ja{display:none;}
 body.ja span.lang-ja,body.ja a.lang-ja{display:inline;}
 body.ja span.lang-en,body.ja a.lang-en{display:none;}
-@media(max-width:720px){.bcard{grid-column:span 6;}}
+@media(max-width:720px){.bcard,.bcard.third{grid-column:span 6;}}
 </style>
 </head>
 <body>
@@ -183,15 +184,15 @@ body.ja span.lang-en,body.ja a.lang-en{display:none;}
     </div>
   </div>
   <div class="bento">
-    <div class="bcard reveal" style="grid-column:span 2;">
+    <div class="bcard third reveal">
       <h3><span class="lang-en">No network. No telemetry.</span><span class="lang-ja">通信なし。テレメトリなし。</span></h3>
       <p><span class="lang-en">Audio is analyzed in memory and never recorded to disk. No accounts, no tracking.</span><span class="lang-ja">音声はメモリ上で解析されるだけで、録音・保存は一切しません。</span></p>
     </div>
-    <div class="bcard reveal" style="grid-column:span 2;">
+    <div class="bcard third reveal">
       <h3><span class="lang-en">One permission only</span><span class="lang-ja">求める許可は1つだけ</span></h3>
       <p><span class="lang-en">macOS asks once for System Audio Recording. That's all LUFSBar needs.</span><span class="lang-ja">初回に一度だけ「システムオーディオ録音」の許可を求めます。必要なのはそれだけ。</span></p>
     </div>
-    <div class="bcard reveal" style="grid-column:span 2;">
+    <div class="bcard third reveal">
       <h3><span class="lang-en">100% open source</span><span class="lang-ja">完全オープンソース</span></h3>
       <p><span class="lang-en">MIT licensed. Read the source, build it yourself, or file an issue.</span><span class="lang-ja">MITライセンス。ソースを読むのも、自分でビルドするのも自由。</span></p>
     </div>
