@@ -6,5 +6,8 @@ DerivedData/
 dist/
 *.zip
 
-# 内部の戦略・開発メモ(競合分析・Apple Developer Team IDを含む、非公開)
+# Internal strategy and development notes (kept private)
 LUFSBar_Handoff.md
+
+# Screenshots used for social posts (not part of the project)
+X/

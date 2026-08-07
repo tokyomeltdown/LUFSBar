@@ -2,9 +2,9 @@ import Foundation
 import CoreAudio
 import os
 
-// macOS 14.4+ の Core Audio process tap で、Macで再生される全プロセスの音声を
-// 1つのaggregate device(tapのみ・private)経由でキャプチャする。
-// 参考: https://github.com/insidegui/AudioCap
+// Uses the macOS 14.4+ Core Audio process tap to capture the audio of every
+// process playing on the Mac through a single private, tap-only aggregate device.
+// Reference: https://github.com/insidegui/AudioCap
 final class SystemAudioTap {
     static let shared = SystemAudioTap()
 
@@ -13,9 +13,9 @@ final class SystemAudioTap {
     private var ioProcID: AudioDeviceIOProcID?
     private var tapDescription: CATapDescription?
 
-    // loudnessMeterはメインスレッド(デバイス切替リスナー、破棄)とCore Audio IOスレッド
-    // (handleAudio、生成・使用)の両方から触るため、参照そのものの差し替えをロックで守る。
-    // (LoudnessMeter内部のos_unfair_lockはstateポインタ用の別ロックで、これとは独立)
+    // loudnessMeter is touched from the main thread (device-change listener, teardown)
+    // and from the Core Audio IO thread (handleAudio, creation and use), so swapping
+    // the reference itself is guarded by a lock. (The os_unfair_lock inside
     private var loudnessMeterLock = os_unfair_lock()
     private var _loudnessMeter: LoudnessMeter?
 
@@ -33,14 +33,14 @@ final class SystemAudioTap {
 
     private var interleaveScratch: [Float32] = []
 
-    // Core Audio process tapは、出力先デバイスのステレオペア数に比例して
-    // レベルが減衰する既知の挙動がある(4ステレオペア=8ch出力デバイスで約-12dB、
-    // 2chデバイスでは0dB。miniaudio issue #875 と同系統)。デフォルト出力デバイスの
-    // チャンネル数から補正ゲインを検出し、キャプチャしたサンプルに掛けて相殺する。
+    // A Core Audio process tap has a known behaviour where the level drops in
+    // proportion to the number of stereo pairs on the output device (about -12dB on an
+    // 8-channel device with 4 stereo pairs, 0dB on a 2-channel device; the same family
+    // as miniaudio issue #875). The correction gain is derived from the channel count
     private var inputGainLinear: Float = 1.0
 
-    // デフォルト出力デバイスが切り替わるたびにinputGainLinearを再検出するための
-    // リスナー。保持しておかないとstop()時に正しいブロック参照で解除できない。
+    // Listener that re-detects inputGainLinear whenever the default output device
+    // changes. It has to be retained, or stop() cannot remove it with the right block.
     private var defaultOutputDeviceListener: AudioObjectPropertyListenerBlock?
 
     private static var defaultOutputDeviceAddress = AudioObjectPropertyAddress(
@@ -50,7 +50,7 @@ final class SystemAudioTap {
     )
 
     private var callbackCount: Int = 0
-    private let logEveryNCallbacks = 40  // 過剰なログを避けるための間引き
+    private let logEveryNCallbacks = 40  // thinned out to avoid flooding the log
 
     func start() {
         inputGainLinear = Self.detectStereoPairCorrection()
@@ -59,10 +59,10 @@ final class SystemAudioTap {
             guard let self else { return }
             let newGain = Self.detectStereoPairCorrection()
             self.inputGainLinear = newGain
-            // サンプルレート/チャンネル数がデバイスごとに違うことがあるため、
-            // 既存のLoudnessMeterを破棄し次のオーディオコールバックで作り直させる。
+            // Sample rate and channel count can differ per device, so the existing
+            // LoudnessMeter is discarded and rebuilt on the next audio callback.
             self.setLoudnessMeter(nil)
-            NSLog("[LUFSBar][Tap] デフォルト出力デバイス変更を検知、補正ゲイン再検出とLoudnessMeter再初期化")
+            NSLog("[LUFSBar][Tap] default output device changed: re-detecting gain, reinitialising LoudnessMeter")
         }
         defaultOutputDeviceListener = listener
         AudioObjectAddPropertyListenerBlock(
@@ -78,12 +78,12 @@ final class SystemAudioTap {
         var newTapID: AudioObjectID = kAudioObjectUnknown
         let tapErr = AudioHardwareCreateProcessTap(description, &newTapID)
         guard tapErr == noErr else {
-            NSLog("[LUFSBar][Tap] tap作成失敗 (OSStatus %d)", tapErr)
+            NSLog("[LUFSBar][Tap] failed to create the tap (OSStatus %d)", tapErr)
             MeterState.shared.reportAudioAccessError()
             return
         }
         tapID = newTapID
-        NSLog("[LUFSBar][Tap] tap作成成功 id=%d", tapID)
+        NSLog("[LUFSBar][Tap] tap created id=%d", tapID)
 
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "LUFSBar-Tap-Aggregate",
@@ -101,30 +101,30 @@ final class SystemAudioTap {
         var newAggregateID: AudioObjectID = kAudioObjectUnknown
         let aggErr = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &newAggregateID)
         guard aggErr == noErr else {
-            NSLog("[LUFSBar][Tap] aggregate device作成失敗 (OSStatus %d)", aggErr)
+            NSLog("[LUFSBar][Tap] failed to create the aggregate device (OSStatus %d)", aggErr)
             MeterState.shared.reportAudioAccessError()
             return
         }
         aggregateID = newAggregateID
-        NSLog("[LUFSBar][Tap] aggregate device作成成功 id=%d", aggregateID)
+        NSLog("[LUFSBar][Tap] aggregate device created id=%d", aggregateID)
 
         var newIOProcID: AudioDeviceIOProcID?
         let ioErr = AudioDeviceCreateIOProcIDWithBlock(&newIOProcID, aggregateID, nil) { [weak self] _, inInputData, _, _, _ in
             self?.handleAudio(inInputData)
         }
         guard ioErr == noErr, let newIOProcID else {
-            NSLog("[LUFSBar][Tap] IOProc作成失敗 (OSStatus %d)", ioErr)
+            NSLog("[LUFSBar][Tap] failed to create the IOProc (OSStatus %d)", ioErr)
             return
         }
         ioProcID = newIOProcID
 
         let startErr = AudioDeviceStart(aggregateID, newIOProcID)
         guard startErr == noErr else {
-            NSLog("[LUFSBar][Tap] AudioDeviceStart失敗 (OSStatus %d)", startErr)
+            NSLog("[LUFSBar][Tap] AudioDeviceStart failed (OSStatus %d)", startErr)
             MeterState.shared.reportAudioAccessError()
             return
         }
-        NSLog("[LUFSBar][Tap] キャプチャ開始")
+        NSLog("[LUFSBar][Tap] capture started")
         MeterState.shared.clearAudioAccessError()
     }
 
@@ -151,14 +151,14 @@ final class SystemAudioTap {
         setLoudnessMeter(nil)
     }
 
-    /// Integratedの計測をリセットする(ポップオーバーのリセットボタンから呼ばれる想定)。
+    /// Resets the Integrated measurement (called from the reset button in the popover).
     func resetIntegrated() {
         loudnessMeter?.resetIntegrated()
     }
 
-    /// デフォルト出力デバイスの総チャンネル数からステレオペア数を求め、
-    /// process tapの既知の減衰(20*log10(ステレオペア数) dB)を相殺するための
-    /// 線形ゲインを返す。取得に失敗した場合や2ch以下のデバイスでは1.0(補正なし)。
+    /// Works out the number of stereo pairs from the total channel count of the default
+    /// output device and returns the linear gain that cancels the tap known attenuation
+    /// of 20*log10(stereo pairs) dB. Returns 1.0 (no correction) on failure or 2ch devices.
     private static func detectStereoPairCorrection() -> Float {
         var deviceID = AudioObjectID(kAudioObjectUnknown)
         var deviceIDSize = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -171,7 +171,7 @@ final class SystemAudioTap {
             AudioObjectID(kAudioObjectSystemObject), &deviceAddress, 0, nil, &deviceIDSize, &deviceID
         )
         guard deviceErr == noErr, deviceID != kAudioObjectUnknown else {
-            NSLog("[LUFSBar][Tap] デフォルト出力デバイス取得失敗、補正なしで続行")
+            NSLog("[LUFSBar][Tap] could not read the default output device; continuing without correction")
             return 1.0
         }
 
@@ -200,7 +200,7 @@ final class SystemAudioTap {
 
         let stereoPairs = max(1, totalChannels / 2)
         let correction = Float(stereoPairs)
-        NSLog("[LUFSBar][Tap] 出力デバイスの総チャンネル数=%d ステレオペア数=%d 補正ゲイン=+%.1fdB",
+        NSLog("[LUFSBar][Tap] output device channels=%d stereo pairs=%d correction=+%.1fdB",
               totalChannels, stereoPairs, 20 * log10(correction))
         return correction
     }
@@ -228,7 +228,7 @@ final class SystemAudioTap {
         let sampleRate = UInt32(nominalSampleRate())
         let meter = LoudnessMeter(sampleRate: sampleRate, channels: channelCount)
         setLoudnessMeter(meter)
-        NSLog("[LUFSBar][Tap] LoudnessMeter初期化 sampleRate=%d channels=%d nonInterleavedBuffers=%d",
+        NSLog("[LUFSBar][Tap] LoudnessMeter init sampleRate=%d channels=%d nonInterleavedBuffers=%d",
               sampleRate, channelCount, abl.count)
         return meter
     }
@@ -246,8 +246,8 @@ final class SystemAudioTap {
         let gain = inputGainLinear
 
         if abl.count == 1 {
-            // インターリーブされた単一バッファ。tap由来のバッファを直接書き換えず、
-            // ゲイン適用のためスクラッチにコピーしてから渡す。
+            // A single interleaved buffer. The tap buffer is not modified in place: it is
+            // copied into scratch so the gain can be applied before handing it over.
             guard let buffer = abl.first, let data = buffer.mData else { return }
             let channelCount = Int(buffer.mNumberChannels)
             guard channelCount > 0 else { return }
@@ -274,7 +274,7 @@ final class SystemAudioTap {
                 meter.addInterleavedFrames(base, frameCount: frameCount)
             }
         } else {
-            // チャンネルごとに分かれた非インターリーブバッファ → ゲイン適用しつつインターリーブに変換
+            // Per-channel non-interleaved buffers: apply the gain while interleaving
             let channelCount = abl.count
             guard let first = abl.first, first.mData != nil else { return }
             let frameCount = Int(first.mDataByteSize) / MemoryLayout<Float32>.size

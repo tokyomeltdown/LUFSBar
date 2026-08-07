@@ -1,21 +1,21 @@
 #!/bin/bash
 # ============================================================
 #  LUFSBar  notarize.sh
-#  Xcodeネイティブアプリ(Release)を
-#    Developer ID 署名(entitlements込み) → 公証(notarize) → staple
-#  ※ VOX Synchronizer/MSWidthのnotarize.shと同じ手順だが、
-#    JUCE/Projucerを使わないため該当ステップは無い。
-#  ※ .pkg化は別途 make_pkg.sh で行う
+#  Takes the native Xcode app (Release) through
+#    Developer ID signing (with entitlements) -> notarization -> stapling
+#  The steps mirror the notarize.sh of the JUCE projects, minus the
+#  Projucer stage, which does not apply here.
+#  Building the .pkg is a separate step: see make_pkg.sh
 # ============================================================
 set -e
 
-# ---- 設定（環境固有の値） ----
+# ---- Settings (specific to this machine and account) ----
 SIGN_ID="Developer ID Application: Ryo Yoneya (WDFKYGRKRW)"
 NOTARY_PROFILE="VOXNotary"
 APP_NAME="LUFSBar"
 VERSION="1.1"
 
-# ---- パス ----
+# ---- Paths ----
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="/tmp/LUFSBar-release-build"
 APP_BUILT="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
@@ -29,12 +29,12 @@ echo "=========================================="
 echo "  LUFSBar  Notarize Build (Release)"
 echo "=========================================="
 
-# ---- Step 1: Release ビルド（署名は後で手動） ----
-#   -destination を省略すると xcodebuild が「具体的な1台のMac(arch:arm64)」を
-#   実行先として選んでしまい、ARCHSに x86_64 を指定していても実質
-#   ONLY_ACTIVE_ARCH=YESのように単一アーキテクチャでしかビルドされない
-#   （実際にarm64のみのバイナリが生成される罠を踏んだ）。
-#   generic/platform=macOS を明示することでARCHS通りのUniversal Binaryになる。
+# ---- Step 1: Release build (signed manually later) ----
+#   Without -destination, xcodebuild picks one specific Mac (arch:arm64) as the
+#   destination, and even with x86_64 listed in ARCHS it effectively builds a
+#   single architecture, as if ONLY_ACTIVE_ARCH=YES were set.
+#   (An arm64-only binary really was produced this way once.)
+#   Passing generic/platform=macOS gives the universal binary ARCHS asks for.
 echo "[1/6] xcodebuild Release (Universal) ..."
 rm -rf "$BUILD_DIR"
 xcodebuild \
@@ -49,16 +49,16 @@ xcodebuild \
     | grep -E "^(Build|error:|warning:|\*\*)" || true
 
 if [ ! -d "$APP_BUILT" ]; then
-    echo "  ERROR: ビルド成果物が見つかりません: $APP_BUILT"
+    echo "  ERROR: build output not found: $APP_BUILT"
     exit 1
 fi
 
-# ---- Step 2: /tmp にクリーンコピー → Developer ID 署名(entitlements込み) ----
-#   ※ 重要：プロジェクトは ~/Documents/Claude/... 配下で同期/監視されており、
-#      署名直前に com.apple.FinderInfo が付与されて codesign が必ず失敗する。
-#      監視外の /tmp にクリーンコピー（ditto --noextattr）してから署名する。
-#   ※ xcodebuildで署名を無効化しているため、entitlements(システムオーディオ
-#      アクセスに必須)をここで明示的に付与しないと本番ビルドで機能しなくなる。
+# ---- Step 2: clean copy to /tmp, then sign with the Developer ID and entitlements ----
+#   IMPORTANT: the project lives under a synced/watched folder, which attaches
+#   com.apple.FinderInfo just before signing and makes codesign fail every time.
+#   Copying to /tmp with ditto --noextattr first avoids it.
+#   Signing is disabled during xcodebuild, so the entitlements (required for
+#   system audio access) must be applied explicitly here or they are lost.
 echo "[2/6] clean copy to /tmp + codesign (Developer ID + hardened runtime + entitlements) ..."
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
@@ -67,19 +67,19 @@ codesign --force --options runtime --timestamp \
     --entitlements "$ENTITLEMENTS" \
     --sign "$SIGN_ID" "$APP_TMP"
 
-# ---- Step 3: 署名検証 ----
+# ---- Step 3: verify the signature ----
 echo "[3/6] verify signature + entitlements ..."
 codesign --verify --strict --verbose=2 "$APP_TMP"
 codesign -d --entitlements :- "$APP_TMP"
 
-# ---- Step 4: 公証用zip作成 → notarytool 申請（完了まで待機） ----
+# ---- Step 4: zip for submission, then notarize and wait ----
 echo "[4/6] notarize (submit & wait) ..."
 rm -f "$ZIP_NOTARIZE"
 ditto -c -k --keepParent "$APP_TMP" "$ZIP_NOTARIZE"
 xcrun notarytool submit "$ZIP_NOTARIZE" \
     --keychain-profile "$NOTARY_PROFILE" --wait
 
-# ---- Step 5: staple（公証チケットを.appに添付）＋検証 ----
+# ---- Step 5: staple the ticket to the .app and validate ----
 echo "[5/6] staple ..."
 xcrun stapler staple "$APP_TMP"
 xcrun stapler validate "$APP_TMP"
@@ -88,7 +88,7 @@ spctl -a -vvv "$APP_TMP" || true
 echo "[6/6] done."
 echo ""
 echo "=========================================="
-echo "  公証完了！"
-echo "  署名済みアプリ: $APP_TMP"
-echo "  次は bash make_pkg.sh で.pkgインストーラーを作成できます"
+echo "  Notarization complete."
+echo "  Signed app: $APP_TMP"
+echo "  Next, run  bash make_pkg.sh  to build the installer"
 echo "=========================================="

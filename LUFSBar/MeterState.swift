@@ -1,23 +1,23 @@
 import Foundation
 import Combine
 
-// SystemAudioTapのLoudnessMeterを ~100ms 間隔でポーリングし、
-// メニューバー表示用のテキストへ変換するObservableObject。
+// Polls the LoudnessMeter in SystemAudioTap roughly every 100ms and turns
+// the result into the text shown in the menu bar.
 enum MenuBarMetric: Equatable {
     case momentary
     case shortTerm
     case integrated
 }
 
-/// ワンクリックで保存する、ある瞬間のI/S/TPのスナップショット。
-/// (Momentaryは一瞬の値なので比較対象に含めない、仕様通り)
+/// A snapshot of I/S/TP at one moment, saved with a single click.
+/// (Momentary is excluded on purpose: too instantaneous to compare against.)
 struct ReferenceSnapshot {
     let shortTermLUFS: Double
     let integratedLUFS: Double
     let truePeakDBTP: Double
 }
 
-/// 主要配信サービスのラウドネス正規化基準(LUFS)。
+/// Loudness normalization targets of the major streaming services (LUFS).
 struct StreamingTarget {
     let name: String
     let targetLUFS: Double
@@ -38,18 +38,18 @@ final class MeterState: ObservableObject {
     @Published private(set) var integratedLUFS: Double = -Double.infinity
     @Published private(set) var truePeakDBTP: Double = -Double.infinity
 
-    // リファレンス・スナップショット: ワンクリックで保存したI/S/TPとの差分を表示する。
+    // Reference snapshot: shows the difference against the I/S/TP saved with one click.
     @Published private(set) var referenceSnapshot: ReferenceSnapshot?
 
-    // SystemAudioTap.start()がtap/aggregate device作成やAudioDeviceStartで
-    // 失敗した(典型的にはシステムオーディオへのアクセス許可が拒否/未許可)場合に立てる。
+    // Set when SystemAudioTap.start() fails creating the tap or the aggregate device,
+    // or in AudioDeviceStart. Typically the system audio permission is denied.
     @Published private(set) var audioAccessError = false
 
-    // postinstallスクリプト(launchctl asuser経由)で自動起動された初回セッションは
-    // インストーラーの文脈が残っており、ここでtapを作成するとTCC許可プロンプトが
-    // 一度も出ないままtccdが抑制状態に入ることが実機で確認された。初回起動だけは
-    // tapをすぐには作らず、ユーザー自身の明示的なクリックを起点にすることで
-    // 正規の許可プロンプトが確実に出るようにする。
+    // When postinstall auto-launches the app via launchctl asuser, that first session
+    // still carries the installer context. Creating the tap there was observed on a real
+    // machine to put tccd into a suppressed state without ever showing the prompt.
+    // So on the first launch the tap is not created immediately; an explicit click from
+    // the user triggers it, which reliably brings up the proper permission prompt.
     static let hasCompletedFirstLaunchKey = "LUFSBar.hasCompletedFirstLaunchTapStart"
     @Published private(set) var needsManualStart = false
 
@@ -63,45 +63,45 @@ final class MeterState: ObservableObject {
         UserDefaults.standard.set(true, forKey: Self.hasCompletedFirstLaunchKey)
     }
 
-    // tap/aggregate device自体は作成に成功していても、システムオーディオ録音の
-    // 権限が無いとAPIはエラーを返さず無音データを流し続けることがある(実機で確認済み)。
-    // 「起動してから一度も有効な音を検出できていない」状態が長時間続いたら、
-    // 権限が無い可能性をヒントとして案内する(確実な検出はできないためヒューリスティック)。
+    // Even with the tap and aggregate device created successfully, without the recording
+    // permission the API returns no error and just delivers silence (seen on a real Mac).
+    // If no valid audio has been seen since launch for a long time, a hint about the
+    // permission is shown. This is a heuristic; there is no reliable way to detect it.
     @Published private(set) var possiblyMissingAudioAccess = false
     private var hasEverCapturedRealAudio = false
     private var neverCapturedPollCount = 0
-    private let possiblyMissingAudioAccessThresholdPolls = 900  // 0.1s間隔 × 900 = 約90秒
+    private let possiblyMissingAudioAccessThresholdPolls = 900  // 0.1s x 900 = about 90 seconds
 
-    // メニューバーにライブ表示する指標。右クリックメニューから切り替えられる。
+    // Which figure is shown live in the menu bar. Switchable from the right-click menu.
     @Published var menuBarMetric: MenuBarMetric = .shortTerm {
         didSet {
-            // 指標を切り替えた瞬間に古い値とブレンドした変な表示にならないよう、
-            // 平滑化状態をリセットする。
+            // Reset the smoothing, so switching does not briefly blend the new figure with the
+            // old one and show something nonsensical.
             displaySmoothedValue = -Double.infinity
         }
     }
 
-    // メニューバー表示のコンパクト化(" LUFS"サフィックスを省き数値のみ表示)。
-    // SettingsViewのトグルと右クリックメニューの両方から変更でき、
-    // 同じ@Publishedプロパティを見ているので自動的に同期する。
+    // Compact menu bar display: drops the " LUFS" suffix and shows the number only.
+    // Changeable from both the Settings toggle and the right-click menu; they observe
+    // the same @Published property, so they stay in sync automatically.
     private static let compactMenuBarKey = "compactMenuBar"
     @Published var compactMenuBar: Bool = false {
         didSet {
             guard oldValue != compactMenuBar else { return }
             UserDefaults.standard.set(compactMenuBar, forKey: Self.compactMenuBarKey)
-            // ポーリングを待たず切替直後に反映する。
+            // Apply immediately instead of waiting for the next poll.
             menuBarText = Self.format(displaySmoothedValue, compact: compactMenuBar)
         }
     }
 
-    // LUFS絶対ゲート相当(-70)を表示下限とし、無音直後の過渡的な異常値
-    // (例: momentaryが-inf化する直前に-1000超の有限値を経由する)や
-    // 桁数の変化によるメニューバー幅の揺れを防ぐ。
+    // Uses the LUFS absolute gate (-70) as the display floor. Hides the transient nonsense
+    // right after silence (momentary can pass a finite value below -1000 before -inf) and
+    // stops the menu bar width wobbling as the digit count changes.
     private static let displayFloor: Double = -70
 
-    // 通常のスペース(U+0020)はレイアウト側で幅を詰められることがあり、
-    // 桁数が変わるたびにメニューバー全体の幅がわずかに揺れる原因になる。
-    // 詰められないノーブレークスペース(U+00A0)で固定5文字幅にパディングする。
+    // A normal space (U+0020) can be collapsed by the layout, which makes the menu bar
+    // width wobble whenever the digit count changes. Padding to a fixed five characters
+    // with a non-breaking space (U+00A0) avoids that.
     private static let nbsp: Character = "\u{00A0}"
 
     private static func padded(_ raw: String) -> String {
@@ -113,17 +113,17 @@ final class MeterState: ObservableObject {
 
     private var timer: Timer?
 
-    // メニューバー表示だけに使う平滑化値。数値自体(shortTermLUFS等)は
-    // 生の値のまま保持し、チラつき対策はテキスト生成の直前だけにかける。
+    // Smoothed value used only for the menu bar text. The figures themselves stay raw;
+    // the anti-flicker pass is applied only when the text is generated.
     private var displaySmoothedValue: Double = -Double.infinity
 
-    // 無音(momentaryが-inf、つまり完全なデジタル無音)が一定時間続いたら
-    // 「再生が止まった」とみなしIntegratedを自動リセットする。曲間の一瞬の
-    // 無音では誤反応しないよう、連続無音時間で判定する。1エピソードにつき
-    // 1回だけリセットし、音が戻ってきたらフラグを解除する。
+    // If silence (momentary at -inf, i.e. true digital silence) lasts a while, playback is
+    // assumed to have stopped and Integrated is reset automatically. The decision uses
+    // continuous silence so a brief gap between tracks does not trigger it. It resets once
+    // per episode, and the flag clears when audio returns.
     private var silentPollCount = 0
     private var hasAutoResetForCurrentSilence = false
-    private let silenceResetThresholdPolls = 20  // 0.1s間隔 × 20 = 約2秒
+    private let silenceResetThresholdPolls = 20  // 0.1s x 20 = about 2 seconds
 
     init() {
         compactMenuBar = UserDefaults.standard.bool(forKey: Self.compactMenuBarKey)
@@ -161,7 +161,7 @@ final class MeterState: ObservableObject {
         audioAccessError = false
     }
 
-    /// 現在値とリファレンスの差分(Δ)。どちらかが無音(-inf)の場合など比較不能ならnil。
+    /// Difference between the current value and the reference. nil when they cannot be compared.
     static func delta(current: Double, reference: Double?) -> Double? {
         guard let reference, current.isFinite, reference.isFinite else { return nil }
         return current - reference
@@ -210,7 +210,7 @@ final class MeterState: ObservableObject {
 
         if selectedValue.isFinite {
             if displaySmoothedValue.isFinite {
-                // 指数移動平均で表示だけを滑らかにする(応答性と落ち着きのバランスを取った係数)。
+                // An exponential moving average smooths the display only.
                 displaySmoothedValue += (selectedValue - displaySmoothedValue) * 0.2
             } else {
                 displaySmoothedValue = selectedValue
@@ -219,7 +219,7 @@ final class MeterState: ObservableObject {
             displaySmoothedValue = -Double.infinity
         }
 
-        // 表示文字列が実際に変わる時だけ@Publishedを更新し、無駄な再描画を避ける。
+        // Only touch @Published when the text actually changes, to avoid needless redraws.
         let newText = Self.format(displaySmoothedValue, compact: compactMenuBar)
         if newText != menuBarText {
             menuBarText = newText
@@ -234,7 +234,7 @@ final class MeterState: ObservableObject {
         return compact ? numberPart : numberPart + String(nbsp) + "LUFS"
     }
 
-    /// ポップオーバーなど、メニューバーの固定幅制約を受けない箇所向けの単純な数値表示。
+    /// A plain numeric readout for places without the menu bar fixed-width constraint.
     static func displayString(_ value: Double) -> String {
         guard value.isFinite else { return "--" }
         let clamped = max(value, displayFloor)

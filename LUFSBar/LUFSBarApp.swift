@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 import Combine
 
-// SwiftUIのMenuBarExtraはタイトル文字列の内容に応じてNSStatusItemの幅を
-// 自動計算し直すため、桁数が変わるたびにAppKit層で気づかない再レイアウトが
-// 入りメニューバーが左右にわずかに揺れる問題が解消できなかった。
-// NSStatusItemを固定幅で直接生成し、タイトル更新もアニメーション無効化した
-// CATransaction経由で行うことで、幅の再計算自体を起こさせない。
+// SwiftUI MenuBarExtra recalculates the NSStatusItem width from the title
+// string, so every time the number of digits changed AppKit quietly relaid
+// out and the menu bar item shifted slightly left and right.
+// Creating the NSStatusItem directly with a fixed width, and updating the
+// title inside a CATransaction with animations disabled, stops that entirely.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     private static let statusItemWidth: CGFloat = 96
-    // コンパクト表示は数値5文字("-14.6"等)のみなので、通常幅よりだいぶ狭くて済む。
+    // Compact mode only shows five characters ("-14.6"), so it can be much narrower.
     private static let compactStatusItemWidth: CGFloat = 56
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -29,11 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         LaunchAtLogin.enableByDefaultOnFirstLaunch()
 
-        // postinstallのlaunchctl asuser経由で自動起動された初回セッションは
-        // インストーラーの文脈が残っており、ここでtapを作成するとTCC許可
-        // プロンプトが一度も出ないままtccdが抑制状態に入ることが実機で確認された。
-        // 初回だけはtapを作らずポップオーバーを自動で開き、ユーザー自身の
-        // クリックを起点にする(2回目以降は従来どおり即start())。
+        // When the postinstall script auto-launches the app through launchctl asuser,
+        // that first session still carries the installer context. Creating the tap
+        // there was observed on a real machine to put tccd into a suppressed state
+        // without ever showing the permission prompt.
+        // So on the first run the tap is not created; the user own click starts it.
         let isFirstLaunch = !UserDefaults.standard.bool(forKey: MeterState.hasCompletedFirstLaunchKey)
         if isFirstLaunch {
             MeterState.shared.markNeedsManualStart()

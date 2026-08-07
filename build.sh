@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================
 #  LUFSBar build.sh
-#  ~/Documents配下(iCloud Drive同期下)でxcodebuildすると、ビルド成果物に
-#  File Provider属性が付いてcodesignが失敗する(resource fork/Finder情報エラー)。
-#  DerivedDataを/tmp(同期対象外)に出すことでこれを回避する。
+#  Building under ~/Documents (which is synced by iCloud Drive) attaches File
+#  Provider attributes to the build output, and codesign then fails with a
+#  resource fork / Finder info error. Putting DerivedData in /tmp avoids it.
 # ============================================================
 set -e
 

@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-// libebur128 (ITU-R BS.1770-4 / EBU R128) の薄いSwiftラッパー。
+// A thin Swift wrapper around libebur128 (ITU-R BS.1770-4 / EBU R128).
 final class LoudnessMeter {
     private var state: UnsafeMutablePointer<ebur128_state>?
     let channels: UInt32
@@ -11,10 +11,10 @@ final class LoudnessMeter {
     private(set) var integratedLUFS: Double = -Double.infinity
     private(set) var truePeakDBTP: Double = -Double.infinity
 
-    // addInterleavedFrames()はCore AudioのリアルタイムIOスレッドから、
-    // resetIntegrated()はメインスレッドのTimerから呼ばれる。stateポインタを
-    // 排他制御しないと、メインスレッドでのdestroy+recreateの最中にIOスレッドが
-    // 解放済みのstateにアクセスしてクラッシュする(実際にSIGSEGVで再現した)。
+    // addInterleavedFrames() is called from the Core Audio realtime IO thread,
+    // resetIntegrated() from a Timer on the main thread. Without a lock around
+    // the state pointer, the IO thread can touch a freed state while the main
+    // thread is between destroy and recreate (reproduced as a real SIGSEGV).
     private var unfairLock = os_unfair_lock()
 
     init?(sampleRate: UInt32, channels: UInt32) {
@@ -33,7 +33,7 @@ final class LoudnessMeter {
         ebur128_destroy(&state)
     }
 
-    /// - Parameter interleaved: チャンネルがインターリーブされたfloatサンプル配列
+    /// - Parameter interleaved: float samples with the channels interleaved
     func addInterleavedFrames(_ interleaved: UnsafePointer<Float>, frameCount: Int) {
         guard frameCount > 0 else { return }
         os_unfair_lock_lock(&unfairLock)
@@ -44,8 +44,8 @@ final class LoudnessMeter {
         refresh(state: state)
     }
 
-    /// Integrated(と付随してM/S)の計測をリセットする。libebur128はIntegratedのみの
-    /// リセットAPIを持たないため、stateを作り直す。
+    /// Resets the Integrated measurement (and M/S with it). libebur128 has no API
+    /// to reset Integrated alone, so the state is rebuilt.
     func resetIntegrated() {
         os_unfair_lock_lock(&unfairLock)
         defer { os_unfair_lock_unlock(&unfairLock) }
@@ -64,7 +64,7 @@ final class LoudnessMeter {
         truePeakDBTP = -Double.infinity
     }
 
-    /// 呼び出し元(addInterleavedFrames)がすでにロックを保持している前提。
+    /// Assumes the caller (addInterleavedFrames) already holds the lock.
     private func refresh(state: UnsafeMutablePointer<ebur128_state>) {
         var m: Double = -Double.infinity
         if ebur128_loudness_momentary(state, &m) == EBUR128_SUCCESS.rawValue {

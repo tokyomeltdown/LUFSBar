@@ -1,8 +1,8 @@
 import Foundation
 import ServiceManagement
 
-// macOS 13+のSMAppService.mainAppを使い、ヘルパーバンドル不要で
-// 自分自身をログイン項目として登録/解除する。
+// Uses SMAppService.mainApp (macOS 13+) to register and unregister the app
+// itself as a login item, with no helper bundle required.
 enum LaunchAtLogin {
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
@@ -20,12 +20,12 @@ enum LaunchAtLogin {
                 }
             }
         } catch {
-            NSLog("[LUFSBar][LaunchAtLogin] 設定変更に失敗: %@", error.localizedDescription)
+            NSLog("[LUFSBar][LaunchAtLogin] failed to change the setting: %@", error.localizedDescription)
         }
     }
 
-    // 初回起動時だけログイン項目をデフォルトでオンにする。ユーザーが設定画面で
-    // 手動でオフにした後は、その選択を尊重し次回以降は勝手にオンへ戻さない。
+    // Enabled by default on the very first launch only. Once the user turns it
+    // off in Settings, that choice is respected and never silently re-enabled.
     private static let hasConfiguredDefaultKey = "LaunchAtLogin.hasConfiguredDefault"
 
     static func enableByDefaultOnFirstLaunch() {

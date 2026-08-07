@@ -11,8 +11,8 @@ struct SettingsView: View {
                     LaunchAtLogin.setEnabled(newValue)
                 }
 
-            // 右クリックメニューのトグルと同じMeterState.shared.compactMenuBarを
-            // 直接バインドしているので、どちらから変更しても自動的に同期する。
+            // Bound directly to MeterState.shared.compactMenuBar, the same value
+            // the right-click menu toggles, so both stay in sync automatically.
             Toggle("Compact menu bar display", isOn: $meterState.compactMenuBar)
 
             Section {
