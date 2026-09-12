@@ -10,7 +10,20 @@
 set -e
 
 # ---- Settings (specific to this machine and account) ----
-SIGN_ID="Developer ID Application: Ryo Yoneya (WDFKYGRKRW)"
+# The signing identity names the Apple account and the team it belongs to.
+# Every signed copy carries it, so it is not much of a secret, but AGENTS.md
+# section 3 keeps values of that kind out of the source. It is read from the
+# environment, or from one line in a file outside the tree.
+SIGNER_FILE="$HOME/.config/tokyomeltdown/signer"
+if [ -z "${SIGNER:-}" ] && [ -f "$SIGNER_FILE" ]; then
+    SIGNER="$(head -1 "$SIGNER_FILE")"
+fi
+if [ -z "${SIGNER:-}" ]; then
+    echo "ERROR: no signing identity."
+    echo "Put the account name and team on one line in $SIGNER_FILE"
+    exit 1
+fi
+SIGN_ID="Developer ID Application: $SIGNER"
 NOTARY_PROFILE="VOXNotary"
 APP_NAME="LUFSBar"
 VERSION="1.1"

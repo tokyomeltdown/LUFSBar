@@ -7,7 +7,7 @@ dist/
 *.zip
 
 # Internal strategy and development notes (kept private)
-LUFSBar_Handoff.md
+*_Handoff.md
 
 # Screenshots used for social posts (not part of the project)
 X/
