@@ -2,12 +2,44 @@ import Foundation
 import CoreAudio
 import os
 
+/// The LUFSBAR_* test switches, read in one place: a positive, finite value no
+/// larger than `limit`, or nil, so a typo cannot reach a conversion that traps.
+enum TestSwitch {
+    static func number(_ name: String, limit: Double) -> Double? {
+        guard let raw = ProcessInfo.processInfo.environment[name],
+              let value = Double(raw), value.isFinite, value > 0 else { return nil }
+        return min(value, limit)
+    }
+}
+
 // Uses the macOS 14.4+ Core Audio process tap to capture what every process is
 // playing to the Mac's default output, through a single private, tap-only
 // aggregate device. Audio sent to any other device is not measured.
 // Reference: https://github.com/insidegui/AudioCap
 final class SystemAudioTap {
     static let shared = SystemAudioTap()
+
+    // Read back with:
+    //   /usr/bin/log show --last 5m --predicate 'subsystem == "com.tokyomeltdown.lufsbar"'
+    // NSLog's text is hidden as <private> in the unified log.
+    private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "tap")
+
+    /// LUFSBAR_METER_HOLD_MS = n: test only. The audio thread holds the meter
+    /// for n ms before feeding it, widening the window in which the main thread
+    /// can let go of it at the same moment. Read once by start().
+    private static let meterHoldMicroseconds: UInt32 =
+        TestSwitch.number("LUFSBAR_METER_HOLD_MS", limit: 1000).map { UInt32($0 * 1000) } ?? 0
+    /// Test only; see LUFSBAR_DROP_METER_EVERY_MS in start().
+    private var meterDropTimer: Timer?
+
+    /// Makes startTap() give up at a named point, so the teardown that runs
+    /// when it does can actually be fired.
+    /// LUFSBAR_FAIL_START_AT = tap | aggregate | ioproc | devicestart
+    private static func shouldFail(at point: String) -> Bool {
+        guard ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_AT"] == point else { return false }
+        log.error("failing on purpose at \(point, privacy: .public)")
+        return true
+    }
 
     private var tapID: AudioObjectID = kAudioObjectUnknown
     private var aggregateID: AudioObjectID = kAudioObjectUnknown
@@ -91,7 +123,7 @@ final class SystemAudioTap {
                 // nothing is rebuilt unless the default output really moved.
                 let newDevice = Self.defaultOutputDevice()
                 guard newDevice != self.boundDevice else { return }
-                NSLog("[LUFSBar][Tap] default output device changed: rebuilding the tap on %@", newDevice?.uid ?? "nothing")
+                Self.log.notice("default output device changed: rebuilding the tap on \(newDevice?.uid ?? "nothing", privacy: .public)")
                 // Sample rate and channel count can differ per device, so the tap
                 // and the LoudnessMeter are both built again for the new one.
                 self.stopTap()
@@ -103,6 +135,19 @@ final class SystemAudioTap {
             )
         }
         startTap()
+
+        // LUFSBAR_DROP_METER_EVERY_MS = n: test only. Lets go of the meter every
+        // n ms the way a device change does, so the next callback needs a new
+        // one. Used with LUFSBAR_METER_HOLD_MS.
+        _ = Self.meterHoldMicroseconds
+        meterDropTimer?.invalidate()
+        meterDropTimer = nil
+        if let ms = TestSwitch.number("LUFSBAR_DROP_METER_EVERY_MS", limit: 60_000) {
+            Self.log.error("dropping the meter on purpose every \(ms) ms")
+            meterDropTimer = Timer.scheduledTimer(withTimeInterval: ms / 1000, repeats: true) { [weak self] _ in
+                self?.setLoudnessMeter(nil)
+            }
+        }
     }
 
     private func startTap() {
@@ -120,7 +165,7 @@ final class SystemAudioTap {
         guard let device = Self.defaultOutputDevice() else {
             // Nothing to measure until an output appears, and when one does the
             // listener sees the default output change and builds the tap then.
-            NSLog("[LUFSBar][Tap] no default output device; waiting for one")
+            Self.log.notice("no default output device; waiting for one")
             return
         }
         let boundUID = device.uid
@@ -133,6 +178,7 @@ final class SystemAudioTap {
             if started {
                 boundDevice = device
             } else {
+                Self.log.error("start gave up part way; tearing the tap back down")
                 stopTap()
             }
         }
@@ -156,22 +202,21 @@ final class SystemAudioTap {
         description.stream = UInt(pair.stream)
         description.isExclusive = true
         description.processes = []
-        NSLog("[LUFSBar][Tap] measuring everything on %@ (stream %ld, channels %ld-%ld)",
-              boundUID, pair.stream, pair.left + 1, pair.right + 1)
+        Self.log.notice("measuring everything on \(boundUID, privacy: .public) (stream \(pair.stream), channels \(pair.left + 1)-\(pair.right + 1))")
         description.name = "LUFSBar System Tap"
         description.muteBehavior = .unmuted
         description.isPrivate = true
         tapDescription = description
 
         var newTapID: AudioObjectID = kAudioObjectUnknown
-        let tapErr = AudioHardwareCreateProcessTap(description, &newTapID)
+        let tapErr = Self.shouldFail(at: "tap") ? kAudioHardwareUnspecifiedError : AudioHardwareCreateProcessTap(description, &newTapID)
         guard tapErr == noErr else {
-            NSLog("[LUFSBar][Tap] failed to create the tap (OSStatus %d)", tapErr)
+            Self.log.error("failed to create the tap (OSStatus \(tapErr))")
             MeterState.shared.reportAudioAccessError()
             return
         }
         tapID = newTapID
-        NSLog("[LUFSBar][Tap] tap created id=%d", tapID)
+        Self.log.notice("tap created id=\(self.tapID)")
 
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "LUFSBar-Tap-Aggregate",
@@ -188,33 +233,33 @@ final class SystemAudioTap {
 
         var newAggregateID: AudioObjectID = kAudioObjectUnknown
         let aggErr = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &newAggregateID)
-        guard aggErr == noErr else {
-            NSLog("[LUFSBar][Tap] failed to create the aggregate device (OSStatus %d)", aggErr)
+        if aggErr == noErr { aggregateID = newAggregateID }
+        guard aggErr == noErr, !Self.shouldFail(at: "aggregate") else {
+            Self.log.error("failed to create the aggregate device (OSStatus \(aggErr))")
             MeterState.shared.reportAudioAccessError()
             return
         }
-        aggregateID = newAggregateID
-        NSLog("[LUFSBar][Tap] aggregate device created id=%d", aggregateID)
+        Self.log.notice("aggregate device created id=\(self.aggregateID)")
 
         var newIOProcID: AudioDeviceIOProcID?
         let ioErr = AudioDeviceCreateIOProcIDWithBlock(&newIOProcID, aggregateID, nil) { [weak self] _, inInputData, _, _, _ in
             self?.handleAudio(inInputData)
         }
-        guard ioErr == noErr, let newIOProcID else {
-            NSLog("[LUFSBar][Tap] failed to create the IOProc (OSStatus %d)", ioErr)
+        if ioErr == noErr, let newIOProcID { ioProcID = newIOProcID }
+        guard ioErr == noErr, let newIOProcID, !Self.shouldFail(at: "ioproc") else {
+            Self.log.error("failed to create the IOProc (OSStatus \(ioErr))")
             MeterState.shared.reportAudioAccessError()
             return
         }
-        ioProcID = newIOProcID
 
-        let startErr = AudioDeviceStart(aggregateID, newIOProcID)
+        let startErr = Self.shouldFail(at: "devicestart") ? kAudioHardwareUnspecifiedError : AudioDeviceStart(aggregateID, newIOProcID)
         guard startErr == noErr else {
-            NSLog("[LUFSBar][Tap] AudioDeviceStart failed (OSStatus %d)", startErr)
+            Self.log.error("AudioDeviceStart failed (OSStatus \(startErr))")
             MeterState.shared.reportAudioAccessError()
             return
         }
         started = true
-        NSLog("[LUFSBar][Tap] capture started")
+        Self.log.notice("capture started")
         MeterState.shared.clearAudioAccessError()
     }
 
@@ -225,6 +270,8 @@ final class SystemAudioTap {
             )
             defaultOutputDeviceListener = nil
         }
+        meterDropTimer?.invalidate()
+        meterDropTimer = nil
         stopTap()
     }
 
@@ -240,11 +287,13 @@ final class SystemAudioTap {
             self.ioProcID = nil
         }
         if aggregateID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
+            let status = AudioHardwareDestroyAggregateDevice(aggregateID)
+            Self.log.notice("aggregate device destroyed id=\(self.aggregateID) (OSStatus \(status))")
             aggregateID = kAudioObjectUnknown
         }
         if tapID != kAudioObjectUnknown {
-            AudioHardwareDestroyProcessTap(tapID)
+            let status = AudioHardwareDestroyProcessTap(tapID)
+            Self.log.notice("tap destroyed id=\(self.tapID) (OSStatus \(status))")
             tapID = kAudioObjectUnknown
         }
         setLoudnessMeter(nil)
@@ -263,14 +312,14 @@ final class SystemAudioTap {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.stereoPairListenerDevice == device,
                       Self.stereoPair(of: device) != self.stereoPair else { return }
-                NSLog("[LUFSBar][Tap] stereo pair changed: rebuilding the tap")
+                Self.log.notice("stereo pair changed: rebuilding the tap")
                 self.stopTap()
                 self.startTap()
             }
         }
         let status = AudioObjectAddPropertyListenerBlock(device, &Self.stereoPairAddress, DispatchQueue.main, listener)
         guard status == noErr else {
-            NSLog("[LUFSBar][Tap] no listener on the stereo pair (OSStatus %d); changes to it will not be followed", status)
+            Self.log.error("no listener on the stereo pair (OSStatus \(status)); changes to it will not be followed")
             return
         }
         stereoPairListener = listener
@@ -376,8 +425,7 @@ final class SystemAudioTap {
         let meter = LoudnessMeter(sampleRate: sampleRate, channels: UInt32(measured.count))
         setLoudnessMeter(meter)
         guard meter != nil else { return nil }
-        NSLog("[LUFSBar][Tap] LoudnessMeter init sampleRate=%d channels=%ld of tapChannels=%ld nonInterleavedBuffers=%ld",
-              sampleRate, measured.count, available, abl.count)
+        Self.log.notice("LoudnessMeter init sampleRate=\(sampleRate) channels=\(measured.count) of tapChannels=\(available) nonInterleavedBuffers=\(abl.count) on the \(Thread.isMainThread ? "main" : "audio", privacy: .public) thread")
         return meter
     }
 
@@ -401,6 +449,7 @@ final class SystemAudioTap {
             setLoudnessMeter(nil)
             return
         }
+        if Self.meterHoldMicroseconds > 0 { usleep(Self.meterHoldMicroseconds) }
 
         if abl.count == 1 {
             // A single interleaved buffer carrying every channel of the stream.
@@ -456,7 +505,6 @@ final class SystemAudioTap {
 
         callbackCount += 1
         guard callbackCount % logEveryNCallbacks == 0 else { return }
-        NSLog("[LUFSBar][Tap] M=%.1f S=%.1f I=%.1f TP=%.1f",
-              meter.momentaryLUFS, meter.shortTermLUFS, meter.integratedLUFS, meter.truePeakDBTP)
+        Self.log.notice("M=\(String(format: "%.1f", meter.momentaryLUFS), privacy: .public) S=\(String(format: "%.1f", meter.shortTermLUFS), privacy: .public) I=\(String(format: "%.1f", meter.integratedLUFS), privacy: .public) TP=\(String(format: "%.1f", meter.truePeakDBTP), privacy: .public)")
     }
 }

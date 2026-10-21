@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Combine
 
 // Polls the LoudnessMeter in SystemAudioTap roughly every 100ms and turns
@@ -30,6 +31,8 @@ struct StreamingTarget {
 }
 
 final class MeterState: ObservableObject {
+    private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "meter")
+
     static let shared = MeterState()
 
     @Published private(set) var menuBarText: String = MeterState.silentText
@@ -177,7 +180,7 @@ final class MeterState: ObservableObject {
         neverCapturedPollCount += 1
         if neverCapturedPollCount >= possiblyMissingAudioAccessThresholdPolls, !possiblyMissingAudioAccess {
             possiblyMissingAudioAccess = true
-            NSLog("[LUFSBar][Meter] no audio since launch: showing the sound output and access hint")
+            Self.log.notice("no audio since launch: showing the sound output and access hint")
         }
     }
 

@@ -1,9 +1,12 @@
 import Foundation
 import ServiceManagement
+import os
 
 // Uses SMAppService.mainApp (macOS 13+) to register and unregister the app
 // itself as a login item, with no helper bundle required.
 enum LaunchAtLogin {
+    private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "app")
+
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
@@ -20,7 +23,7 @@ enum LaunchAtLogin {
                 }
             }
         } catch {
-            NSLog("[LUFSBar][LaunchAtLogin] failed to change the setting: %@", error.localizedDescription)
+            log.error("Launch at Login: failed to change the setting: \(error.localizedDescription, privacy: .public)")
         }
     }
 

@@ -76,9 +76,19 @@ final class LoudnessMeter {
             return nil
         }
         state = st
+        // Touched here so that its first use, in a deinit that might run on the
+        // audio thread, does not also build it there.
+        _ = Self.log
     }
 
+    private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "meter")
+
     deinit {
+        // ebur128_destroy is a run of free(), which has no place on the audio
+        // thread. Logged so a test can count how often it happens.
+        if !Thread.isMainThread {
+            Self.log.error("a meter was freed off the main thread")
+        }
         // Swift runs deinit even when init? returned nil, which it does when
         // ebur128_init refuses the sample rate, and ebur128_destroy follows
         // the pointer without checking it. Measured: a rate of 0 or 3,000,000

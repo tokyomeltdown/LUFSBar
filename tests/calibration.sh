@@ -27,15 +27,15 @@
 # Needs tone_to_device, default_output and stereo_channels (built from this
 # folder) in $BIN. The multichannel device needs at least four outputs.
 # The app is launched with open, so it keeps its own system audio permission,
-# and its stderr (where the NSLog lines go) is read from a file.
+# and its log is read back with log show (see applog.sh).
 # Restores the default output and the stereo pair, and quits the app, when it
 # is done.
 
 set -u
+source ${0:A:h}/applog.sh
 APP=$1; TONE=$2; MULTI=$3; STEREO=$4; THIRD=${5:-}
 BIN=${BIN:?set BIN to the folder holding tone_to_device and default_output}
-WORK=$(mktemp -d)
-LOG=$WORK/stderr.log
+LAUNCHED=$(mark)
 ORIGINAL=$("$BIN/default_output" -u) || { print "no default output to restore afterwards"; exit 2; }
 PAIR=$("$BIN/stereo_channels" "$MULTI") && PAIR=${PAIR%% streams=*}
 [[ $PAIR == <->' '<-> ]] || { print "cannot read the stereo pair of \"$MULTI\""; exit 2; }
@@ -45,7 +45,7 @@ finish() {
     "$BIN/stereo_channels" "$MULTI" ${=PAIR} >/dev/null || print "could not restore the stereo pair of $MULTI ($PAIR)"
     "$BIN/default_output" "$ORIGINAL" >/dev/null || print "could not restore the default output ($ORIGINAL)"
     killall LUFSBar 2>/dev/null
-    print "log: $LOG"
+    print "log: /usr/bin/log show --start \"$LAUNCHED\" --predicate 'subsystem == \"$APPLOG_SUBSYSTEM\"' --style compact"
 }
 trap finish EXIT
 
@@ -59,13 +59,13 @@ for device in "$MULTI" "$STEREO" ${THIRD:+"$THIRD"}; do
 done
 
 "$BIN/default_output" "$MULTI" >/dev/null
-open --stderr "$LOG" "$APP"
-for i in {1..30}; do grep -q "capture started\|failed" "$LOG" 2>/dev/null && break; sleep 1; done
-grep -q "capture started" "$LOG" || { print "capture did not start within 30 s"; exit 2; }
+LAUNCHED=$(mark)
+open "$APP"
+applog_wait "$LAUNCHED" 30 "capture started" || { print "capture did not start within 30 s"; exit 2; }
 
-# The M= readings logged since line $1, finite ones only.
+# The M= readings logged since mark $1, finite ones only.
 readings() {
-    tail -n +$1 "$LOG" | grep -o "M=-*[0-9.]*" | cut -c3- | grep -E '^-?[0-9]'
+    applog_since "$1" | grep -o "M=-*[0-9.]*" | cut -c3- | grep -E '^-?[0-9]'
 }
 # The value logged most often: the steady reading, whatever the fade-in and
 # fade-out around it did. "none" when nothing finite was logged.
@@ -82,7 +82,7 @@ check() {
     local name=$1 default=$2 player=$3 want=$4 from got ok played=1
     "$BIN/default_output" "$default" >/dev/null || played=0
     sleep 3
-    from=$(( $(wc -l < "$LOG") + 1 ))
+    from=$(mark)
     if (( played )); then
         if [[ $player == afplay ]]; then
             # afplay stops at the end of the file however long -t asks for, and
