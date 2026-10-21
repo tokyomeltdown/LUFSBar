@@ -65,8 +65,9 @@ final class MeterState: ObservableObject {
 
     // Even with the tap and aggregate device created successfully, without the recording
     // permission the API returns no error and just delivers silence (seen on a real Mac).
-    // If no valid audio has been seen since launch for a long time, a hint about the
-    // permission is shown. This is a heuristic; there is no reliable way to detect it.
+    // Since 1.1.1 only the default output is measured, so audio going to another device
+    // looks the same. If no valid audio has been seen since launch for a long time, a hint
+    // naming both is shown. This is a heuristic; there is no reliable way to detect either.
     @Published private(set) var possiblyMissingAudioAccess = false
     private var hasEverCapturedRealAudio = false
     private var neverCapturedPollCount = 0
@@ -167,8 +168,22 @@ final class MeterState: ObservableObject {
         return current - reference
     }
 
+    /// Counts towards the hint above. Called whether or not a meter exists: the tap only
+    /// starts delivering once something plays to the device it is bound to, so with the
+    /// audio going elsewhere no meter is ever built, and that is exactly when the hint is
+    /// needed.
+    private func noteNoAudioYet() {
+        guard !hasEverCapturedRealAudio, !needsManualStart else { return }
+        neverCapturedPollCount += 1
+        if neverCapturedPollCount >= possiblyMissingAudioAccessThresholdPolls, !possiblyMissingAudioAccess {
+            possiblyMissingAudioAccess = true
+            NSLog("[LUFSBar][Meter] no audio since launch: showing the sound output and access hint")
+        }
+    }
+
     private func refresh() {
         guard let meter = SystemAudioTap.shared.loudnessMeter else {
+            noteNoAudioYet()
             displaySmoothedValue = -Double.infinity
             let silentDisplay = compactMenuBar ? Self.padded("--") : Self.silentText
             if menuBarText != silentDisplay {
@@ -188,12 +203,7 @@ final class MeterState: ObservableObject {
             silentPollCount = 0
             hasAutoResetForCurrentSilence = false
         } else {
-            if !hasEverCapturedRealAudio {
-                neverCapturedPollCount += 1
-                if neverCapturedPollCount >= possiblyMissingAudioAccessThresholdPolls {
-                    possiblyMissingAudioAccess = true
-                }
-            }
+            noteNoAudioYet()
             silentPollCount += 1
             if silentPollCount >= silenceResetThresholdPolls && !hasAutoResetForCurrentSilence {
                 SystemAudioTap.shared.resetIntegrated()

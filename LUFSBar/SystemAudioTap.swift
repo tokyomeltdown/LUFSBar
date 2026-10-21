@@ -52,6 +52,25 @@ final class SystemAudioTap {
     // changes. It has to be retained, or stop() cannot remove it with the right block.
     private var defaultOutputDeviceListener: AudioObjectPropertyListenerBlock?
 
+    /// Where the device's stereo pair sits: which output stream the tap is bound
+    /// to, and the two channels within it (zero-based).
+    private struct StereoPair: Equatable {
+        var stream = 0
+        var left = 0
+        var right = 1
+    }
+    private var stereoPair = StereoPair()
+    // Rebuilds the tap when the bound device's stereo pair is changed in Audio
+    // MIDI Setup. Belongs to one device, so it is removed with the tap.
+    private var stereoPairListener: AudioObjectPropertyListenerBlock?
+    private var stereoPairListenerDevice = AudioObjectID(kAudioObjectUnknown)
+
+    private static var stereoPairAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyPreferredChannelsForStereo,
+        mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+
     private static var defaultOutputDeviceAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -62,6 +81,9 @@ final class SystemAudioTap {
     private let logEveryNCallbacks = 40  // thinned out to avoid flooding the log
 
     func start() {
+        // A second start would overwrite tapID and aggregateID, leaking the tap that
+        // is running, and change what its IOProc reads while it runs.
+        stopTap()
         if defaultOutputDeviceListener == nil {
             let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 guard let self else { return }
@@ -115,6 +137,14 @@ final class SystemAudioTap {
             }
         }
 
+        // macOS plays stereo to the pair set in Audio MIDI Setup > Configure
+        // Speakers, which is 1-2 unless someone changed it, so that is the pair
+        // measured. Set here, before the IOProc exists, and not touched again
+        // until stopTap() has stopped it.
+        let pair = Self.stereoPair(of: device.id)
+        stereoPair = pair
+        listenForStereoPairChanges(on: device.id)
+
         let description = CATapDescription()
         // Mixdown off: with it on, a device-bound tap delivers the right peaks
         // but half the energy, which is not a waveform to measure loudness on.
@@ -123,10 +153,11 @@ final class SystemAudioTap {
         description.deviceUID = boundUID
         // Required. Left unset, the tap is created without complaint and then
         // never delivers a callback.
-        description.stream = 0
+        description.stream = UInt(pair.stream)
         description.isExclusive = true
         description.processes = []
-        NSLog("[LUFSBar][Tap] measuring everything on %@", boundUID)
+        NSLog("[LUFSBar][Tap] measuring everything on %@ (stream %ld, channels %ld-%ld)",
+              boundUID, pair.stream, pair.left + 1, pair.right + 1)
         description.name = "LUFSBar System Tap"
         description.muteBehavior = .unmuted
         description.isPrivate = true
@@ -198,6 +229,11 @@ final class SystemAudioTap {
     }
 
     private func stopTap() {
+        if let listener = stereoPairListener {
+            AudioObjectRemovePropertyListenerBlock(stereoPairListenerDevice, &Self.stereoPairAddress, DispatchQueue.main, listener)
+            stereoPairListener = nil
+            stereoPairListenerDevice = AudioObjectID(kAudioObjectUnknown)
+        }
         if let ioProcID {
             AudioDeviceStop(aggregateID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
@@ -217,6 +253,67 @@ final class SystemAudioTap {
     /// Resets the Integrated measurement (called from the reset button in the popover).
     func resetIntegrated() {
         loudnessMeter?.resetIntegrated()
+    }
+
+    private func listenForStereoPairChanges(on device: AudioObjectID) {
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            // Rebuilt on the next turn of the main queue rather than here: the
+            // rebuild removes this very listener, which is not something to do
+            // from inside its own callback.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.stereoPairListenerDevice == device,
+                      Self.stereoPair(of: device) != self.stereoPair else { return }
+                NSLog("[LUFSBar][Tap] stereo pair changed: rebuilding the tap")
+                self.stopTap()
+                self.startTap()
+            }
+        }
+        let status = AudioObjectAddPropertyListenerBlock(device, &Self.stereoPairAddress, DispatchQueue.main, listener)
+        guard status == noErr else {
+            NSLog("[LUFSBar][Tap] no listener on the stereo pair (OSStatus %d); changes to it will not be followed", status)
+            return
+        }
+        stereoPairListener = listener
+        stereoPairListenerDevice = device
+    }
+
+    /// The device's stereo pair (Audio MIDI Setup > Configure Speakers), as the
+    /// output stream that holds it and the two channels within that stream. The
+    /// pair is numbered across all of the device's output streams, so it is
+    /// walked stream by stream. Channels 1-2 of the first stream when the pair
+    /// cannot be read, or when its two channels are not in the same stream.
+    private static func stereoPair(of device: AudioObjectID) -> StereoPair {
+        var channels: [UInt32] = [1, 2]
+        var size = UInt32(MemoryLayout<UInt32>.size * 2)
+        if AudioObjectGetPropertyData(device, &stereoPairAddress, 0, nil, &size, &channels) != noErr {
+            channels = [1, 2]
+        }
+        let left = Int(channels[0]) - 1
+        let right = Int(channels[1]) - 1
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard left >= 0, right >= 0,
+              AudioObjectGetPropertyDataSize(device, &address, 0, nil, &dataSize) == noErr, dataSize > 0 else {
+            return StereoPair()
+        }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(dataSize), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &dataSize, raw) == noErr else { return StereoPair() }
+
+        var first = 0
+        for (stream, buffer) in UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self)).enumerated() {
+            let range = first..<(first + Int(buffer.mNumberChannels))
+            if range.contains(left) && range.contains(right) {
+                return StereoPair(stream: stream, left: left - first, right: right - first)
+            }
+            first = range.upperBound
+        }
+        return StereoPair()
     }
 
     /// The Mac's current default output device, or nil when there is none.
@@ -252,27 +349,34 @@ final class SystemAudioTap {
         return sampleRate
     }
 
-    /// How many channels the tap delivers: the bound device's own count (ten on a
-    /// ten output interface), in one interleaved buffer or one buffer per channel.
+    /// How many channels the tap delivers: the bound device stream's own count
+    /// (ten on a ten output interface), in one interleaved buffer or one buffer
+    /// per channel.
     private static func availableChannels(in abl: UnsafeMutableAudioBufferListPointer) -> Int {
         abl.count == 1 ? Int(abl.first?.mNumberChannels ?? 0) : abl.count
     }
 
-    /// Channels one and two are measured: the monitor pair. A source playing out
-    /// of three and four is not measured, which is a known limit.
-    private static func measuredChannels(in abl: UnsafeMutableAudioBufferListPointer) -> Int {
-        min(availableChannels(in: abl), 2)
+    /// The channels measured, as positions in what the tap delivers: the
+    /// device's stereo pair, or channels 1-2 if the pair is no longer inside the
+    /// stream (it is re-read whenever the tap is built), or the one channel of a
+    /// mono device. No array, because this runs on the IO thread.
+    private func measuredChannels(available: Int) -> (count: Int, left: Int, right: Int) {
+        guard available >= 2 else { return (available, 0, 0) }
+        let pair = stereoPair
+        guard pair.left < available, pair.right < available else { return (2, 0, 1) }
+        return (2, pair.left, pair.right)
     }
 
     @discardableResult
     private func setupLoudnessMeter(abl: UnsafeMutableAudioBufferListPointer) -> LoudnessMeter? {
-        let channelCount = UInt32(Self.measuredChannels(in: abl))
-        guard channelCount > 0 else { return nil }
+        let available = Self.availableChannels(in: abl)
+        let measured = measuredChannels(available: available)
+        guard measured.count > 0 else { return nil }
         let sampleRate = UInt32(nominalSampleRate())
-        let meter = LoudnessMeter(sampleRate: sampleRate, channels: channelCount)
+        let meter = LoudnessMeter(sampleRate: sampleRate, channels: UInt32(measured.count))
         setLoudnessMeter(meter)
-        NSLog("[LUFSBar][Tap] LoudnessMeter init sampleRate=%d channels=%d of tapChannels=%ld nonInterleavedBuffers=%ld",
-              sampleRate, channelCount, Self.availableChannels(in: abl), abl.count)
+        NSLog("[LUFSBar][Tap] LoudnessMeter init sampleRate=%d channels=%ld of tapChannels=%ld nonInterleavedBuffers=%ld",
+              sampleRate, measured.count, available, abl.count)
         return meter
     }
 
@@ -289,7 +393,8 @@ final class SystemAudioTap {
         // The meter reads `channels` samples per frame. If the device changed its
         // layout under the same tap, feeding it the new layout would make it read
         // past what was copied, so it is dropped and built again for the new one.
-        let measured = Self.measuredChannels(in: abl)
+        let available = Self.availableChannels(in: abl)
+        let (measured, left, right) = measuredChannels(available: available)
         guard measured > 0 else { return }
         guard measured == Int(meter.channels) else {
             setLoudnessMeter(nil)
@@ -297,13 +402,12 @@ final class SystemAudioTap {
         }
 
         if abl.count == 1 {
-            // A single interleaved buffer carrying every channel of the device.
-            // The first `measured` channels of each frame are copied into scratch.
+            // A single interleaved buffer carrying every channel of the stream.
+            // The measured channels of each frame are copied into scratch.
             guard let buffer = abl.first, let data = buffer.mData else { return }
-            let channelCount = Int(buffer.mNumberChannels)
-            let frameCount = Int(buffer.mDataByteSize) / (MemoryLayout<Float32>.size * channelCount)
+            let frameCount = Int(buffer.mDataByteSize) / (MemoryLayout<Float32>.size * available)
             guard frameCount > 0 else { return }
-            let samples = data.bindMemory(to: Float32.self, capacity: frameCount * channelCount)
+            let samples = data.bindMemory(to: Float32.self, capacity: frameCount * available)
 
             let needed = frameCount * measured
             if interleaveScratch.count < needed {
@@ -312,32 +416,37 @@ final class SystemAudioTap {
             interleaveScratch.withUnsafeMutableBufferPointer { scratch in
                 guard let dst = scratch.baseAddress else { return }
                 for frame in 0..<frameCount {
-                    for ch in 0..<measured {
-                        dst[frame * measured + ch] = samples[frame * channelCount + ch]
+                    dst[frame * measured] = samples[frame * available + left]
+                    if measured == 2 {
+                        dst[frame * 2 + 1] = samples[frame * available + right]
                     }
                 }
                 meter.addInterleavedFrames(dst, frameCount: frameCount)
             }
         } else {
-            // Per-channel non-interleaved buffers: the first `measured` are interleaved
-            guard let first = abl.first, first.mData != nil else { return }
-            let frameCount = Int(first.mDataByteSize) / MemoryLayout<Float32>.size
-            guard frameCount > 0 else { return }
-            for ch in 0..<measured {
-                guard abl[ch].mData != nil,
-                      Int(abl[ch].mDataByteSize) / MemoryLayout<Float32>.size >= frameCount else { return }
+            // One buffer per channel: the measured ones are interleaved.
+            // (measuredChannels keeps left and right below abl.count.)
+            let frameCount = Int(abl[left].mDataByteSize) / MemoryLayout<Float32>.size
+            guard frameCount > 0, let leftData = abl[left].mData else { return }
+            var rightData: UnsafeMutableRawPointer?
+            if measured == 2 {
+                guard Int(abl[right].mDataByteSize) / MemoryLayout<Float32>.size >= frameCount,
+                      let data = abl[right].mData else { return }
+                rightData = data
             }
 
             let needed = frameCount * measured
             if interleaveScratch.count < needed {
                 interleaveScratch = [Float32](repeating: 0, count: needed)
             }
+            let leftSamples = leftData.bindMemory(to: Float32.self, capacity: frameCount)
+            let rightSamples = rightData?.bindMemory(to: Float32.self, capacity: frameCount)
             interleaveScratch.withUnsafeMutableBufferPointer { scratch in
                 guard let dst = scratch.baseAddress else { return }
-                for ch in 0..<measured {
-                    let samples = abl[ch].mData!.bindMemory(to: Float32.self, capacity: frameCount)
-                    for frame in 0..<frameCount {
-                        dst[frame * measured + ch] = samples[frame]
+                for frame in 0..<frameCount {
+                    dst[frame * measured] = leftSamples[frame]
+                    if let rightSamples {
+                        dst[frame * 2 + 1] = rightSamples[frame]
                     }
                 }
                 meter.addInterleavedFrames(dst, frameCount: frameCount)

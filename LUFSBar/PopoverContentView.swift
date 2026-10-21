@@ -104,7 +104,7 @@ struct PopoverContentView: View {
             Text("Not detecting any audio yet")
                 .font(.caption)
                 .fontWeight(.semibold)
-            Text("If this doesn't change while sound is playing, check System Audio Recording access.")
+            Text("LUFSBar measures what goes to your Mac's sound output. If sound is playing, check Sound › Output in System Settings, then System Audio Recording access.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -20,7 +20,7 @@ LUFSBar measures the audio going to your Mac's **current sound output** (System 
 
 - **An app playing to a different device is not measured.** If your DAW plays to an audio interface while the Mac's output is the built-in speakers, set the Mac's output to the interface too.
 - **It follows the output.** When you switch the sound output, LUFSBar starts measuring the new device (Integrated starts over).
-- **Outputs 1–2.** On a multichannel interface, the first stereo pair is measured.
+- **The device's stereo pair.** On a multichannel interface, the outputs set for stereo in Audio MIDI Setup › Configure Speakers are measured (1–2 unless you changed it).
 
 Up to 1.1, LUFSBar measured every device at once and corrected the level by guessing from the current output, which could read about 14 dB off when apps played to different devices. 1.1.1 measures one device at its true level instead.
 
