@@ -27,8 +27,11 @@ VERSION="1.1"
 BUNDLE_ID="com.tokyomeltdown.lufsbar"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP_TMP="/tmp/${APP_NAME}_notarize/$APP_NAME.app"
-WORK="/tmp/${APP_NAME}_pkg_work"
+# The same per-user work folder notarize.sh uses (see there).
+RELEASE_DIR="${LUFSBAR_RELEASE_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
+RELEASE_DIR="${RELEASE_DIR%/}/LUFSBar-release"
+APP_TMP="$RELEASE_DIR/notarize/$APP_NAME.app"
+WORK="$RELEASE_DIR/pkg"
 DIST_DIR="$ROOT/dist"
 PKG_SIGNED="$DIST_DIR/${APP_NAME}_${VERSION}.pkg"
 # A copy without the version number. Uploading it to GitHub Releases under this
@@ -39,9 +42,32 @@ echo "=========================================="
 echo "  LUFSBar  make_pkg.sh  (v${VERSION})"
 echo "=========================================="
 
+# Last run's packages go first. The version-less one is what gets uploaded to
+# Releases, so a run that stops at a check below must not leave an older one
+# there looking like this version.
+rm -f "$PKG_SIGNED" "$PKG_LATEST"
+
 if [ ! -d "$APP_TMP" ]; then
     echo "ERROR: signed and notarized app not found: $APP_TMP"
     echo "Run bash notarize.sh first."
+    exit 1
+fi
+
+# ---- Step 0: is this the app that was just notarized? ----
+#   Whatever sits at APP_TMP gets wrapped, and nothing later would notice a
+#   wrong one: an app from another version would pass notarization as part of
+#   the pkg and ship labelled with this VERSION, and so would an app that was
+#   signed but never stapled, since the pkg gets its own ticket.
+echo "[0/5] check the app's version and its notarization ..."
+APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_TMP/Contents/Info.plist")"
+if [ "$APP_VERSION" != "$VERSION" ]; then
+    echo "ERROR: $APP_TMP is version $APP_VERSION, not $VERSION."
+    echo "Run bash notarize.sh again, or fix VERSION here."
+    exit 1
+fi
+if ! xcrun stapler validate "$APP_TMP"; then
+    echo "ERROR: $APP_TMP has no notarization ticket stapled to it."
+    echo "Run bash notarize.sh again."
     exit 1
 fi
 
@@ -71,10 +97,22 @@ exit 0
 EOF
 chmod +x "$WORK/scripts/postinstall"
 
+# ---- Step 0.5: never relocate ----
+#   pkgbuild's default makes the bundle relocatable (PackageInfo carries
+#   <relocate>): if a copy with the same bundle id is found anywhere else, in
+#   the Trash, Downloads or a build folder, Installer updates that one and
+#   /Applications keeps the old version, which postinstall then relaunches.
+#   1.1 shipped like that.
+echo "[0.5/5] component plist (BundleIsRelocatable false) ..."
+COMPONENT_PLIST="$WORK/component.plist"
+pkgbuild --analyze --root "$WORK/root" "$COMPONENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
+
 # ---- Step 1: pkgbuild (installs into /Applications) + Developer ID Installer signature ----
-echo "[1/4] pkgbuild + sign ..."
+echo "[1/5] pkgbuild + sign ..."
 pkgbuild \
     --root "$WORK/root" \
+    --component-plist "$COMPONENT_PLIST" \
     --scripts "$WORK/scripts" \
     --install-location "/" \
     --identifier "$BUNDLE_ID" \
@@ -82,13 +120,22 @@ pkgbuild \
     --sign "$SIGN_INST" \
     "$PKG_SIGNED"
 
+# The pin from step 0.5 has to have reached the package, checked before it
+# goes to Apple: an empty <relocate/> means nothing may be relocated.
+pkgutil --expand "$PKG_SIGNED" "$WORK/expanded"
+if ! grep -q "<relocate/>" "$WORK/expanded/PackageInfo"; then
+    echo "ERROR: the package still lets Installer relocate the app."
+    rm -f "$PKG_SIGNED"
+    exit 1
+fi
+
 # ---- Step 2: notarize the pkg ----
-echo "[2/4] notarize pkg (submit & wait) ..."
+echo "[2/5] notarize pkg (submit & wait) ..."
 xcrun notarytool submit "$PKG_SIGNED" \
     --keychain-profile "$NOTARY_PROFILE" --wait
 
 # ---- Step 3: staple ----
-echo "[3/4] staple ..."
+echo "[3/5] staple ..."
 xcrun stapler staple "$PKG_SIGNED"
 xcrun stapler validate "$PKG_SIGNED"
 

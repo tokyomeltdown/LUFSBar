@@ -9,6 +9,19 @@
 # ============================================================
 set -e
 
+# Work folders live in the per-user temporary folder (private to this account)
+# rather than at fixed names in the shared /tmp, where another account could
+# have put a folder or a link first. Either way they are outside the synced
+# project folder, which is what codesign needs (see Step 2). Asked of getconf
+# rather than taken from $TMPDIR, so that this and make_pkg.sh agree even when
+# they are started from different shells. LUFSBAR_RELEASE_DIR overrides it.
+RELEASE_DIR="${LUFSBAR_RELEASE_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
+RELEASE_DIR="${RELEASE_DIR%/}/LUFSBar-release"
+WORK_DIR="$RELEASE_DIR/notarize"
+# The last run's signed app goes first, before any check below can stop this
+# run: left behind, make_pkg.sh would wrap it as though it were this build.
+rm -rf "$WORK_DIR"
+
 # ---- Settings (specific to this machine and account) ----
 # The signing identity names the Apple account and the team it belongs to.
 # Every signed copy carries it, so it is not much of a secret, but AGENTS.md
@@ -30,13 +43,12 @@ VERSION="1.1"
 
 # ---- Paths ----
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="/tmp/LUFSBar-release-build"
+BUILD_DIR="$RELEASE_DIR/build"
 APP_BUILT="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 ENTITLEMENTS="$ROOT/LUFSBar/LUFSBar.entitlements"
 
-WORK_DIR="/tmp/${APP_NAME}_notarize"
 APP_TMP="$WORK_DIR/$APP_NAME.app"
-ZIP_NOTARIZE="/tmp/${APP_NAME}_submit.zip"
+ZIP_NOTARIZE="$RELEASE_DIR/submit.zip"
 
 echo "=========================================="
 echo "  LUFSBar  Notarize Build (Release)"
@@ -50,6 +62,9 @@ echo "=========================================="
 #   Passing generic/platform=macOS gives the universal binary ARCHS asks for.
 echo "[1/6] xcodebuild Release (Universal) ..."
 rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+BUILD_LOG="$RELEASE_DIR/xcodebuild.log"
+set +e
 xcodebuild \
     -project "$ROOT/LUFSBar.xcodeproj" \
     -scheme LUFSBar \
@@ -59,20 +74,36 @@ xcodebuild \
     CODE_SIGN_IDENTITY="" \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_ALLOWED=NO \
-    | grep -E "^(Build|error:|warning:|\*\*)" || true
+    > "$BUILD_LOG" 2>&1
+BUILD_STATUS=$?
+set -e
+grep -E "^(Build|error:|warning:|\*\*)|: error:" "$BUILD_LOG" || true
 
-if [ ! -d "$APP_BUILT" ]; then
-    echo "  ERROR: build output not found: $APP_BUILT"
+# The build's own answer decides, not whether a bundle appeared: a failed
+# compile still leaves LUFSBar.app behind, with an empty MacOS folder, and the
+# old check let it go on to be signed. (Piping xcodebuild into grep with
+# "|| true" had thrown that answer away.)
+if [ "$BUILD_STATUS" -ne 0 ]; then
+    echo "  ERROR: xcodebuild failed (exit $BUILD_STATUS). Full log: $BUILD_LOG"
+    exit 1
+fi
+if [ ! -x "$APP_BUILT/Contents/MacOS/$APP_NAME" ]; then
+    echo "  ERROR: no executable in the build output: $APP_BUILT"
+    exit 1
+fi
+BUILT_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_BUILT/Contents/Info.plist")"
+if [ "$BUILT_VERSION" != "$VERSION" ]; then
+    echo "  ERROR: the build is version $BUILT_VERSION, but VERSION here is $VERSION."
     exit 1
 fi
 
-# ---- Step 2: clean copy to /tmp, then sign with the Developer ID and entitlements ----
+# ---- Step 2: clean copy to the work folder, then sign with the Developer ID and entitlements ----
 #   IMPORTANT: the project lives under a synced/watched folder, which attaches
 #   com.apple.FinderInfo just before signing and makes codesign fail every time.
-#   Copying to /tmp with ditto --noextattr first avoids it.
+#   Copying it out of the project with ditto --noextattr first avoids it.
 #   Signing is disabled during xcodebuild, so the entitlements (required for
 #   system audio access) must be applied explicitly here or they are lost.
-echo "[2/6] clean copy to /tmp + codesign (Developer ID + hardened runtime + entitlements) ..."
+echo "[2/6] clean copy to the work folder + codesign (Developer ID + hardened runtime + entitlements) ..."
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 ditto --norsrc --noextattr --noqtn --noacl "$APP_BUILT" "$APP_TMP"
