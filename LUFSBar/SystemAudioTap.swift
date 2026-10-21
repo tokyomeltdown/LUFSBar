@@ -375,6 +375,7 @@ final class SystemAudioTap {
         let sampleRate = UInt32(nominalSampleRate())
         let meter = LoudnessMeter(sampleRate: sampleRate, channels: UInt32(measured.count))
         setLoudnessMeter(meter)
+        guard meter != nil else { return nil }
         NSLog("[LUFSBar][Tap] LoudnessMeter init sampleRate=%d channels=%ld of tapChannels=%ld nonInterleavedBuffers=%ld",
               sampleRate, measured.count, available, abl.count)
         return meter

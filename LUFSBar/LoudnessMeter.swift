@@ -15,53 +15,125 @@ final class LoudnessMeter {
     // resetIntegrated() from a Timer on the main thread. Without a lock around
     // the state pointer, the IO thread can touch a freed state while the main
     // thread is between destroy and recreate (reproduced as a real SIGSEGV).
-    private var unfairLock = os_unfair_lock()
+    /// A pointer rather than a stored value, because passing `&someProperty` to
+    /// a C function can hand it a temporary copy, and a lock that gets copied is
+    /// not a lock.
+    private let unfairLock: UnsafeMutablePointer<os_unfair_lock_s> = {
+        let lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
+        lock.initialize(to: os_unfair_lock_s())
+        return lock
+    }()
+
+    /// The figures are read back from the library once per 100 ms of audio
+    /// rather than on every callback. Short-term sums its whole 3 s window
+    /// each time it is asked, so asking on every buffer cost the same however
+    /// small the buffer: measured with this file and the vendored ebur128.c,
+    /// 456 us a callback at 48 kHz / 512 (4% of the budget), 848 us at
+    /// 96 kHz / 128 (64%) and 1683 us at 192 kHz / 256 (126%, more than the
+    /// buffer lasts). The panel reads every 100 ms, and the
+    /// library keeps the true peak between reads, so nothing shown changes.
+    ///
+    /// What is over the 100 ms is carried, not dropped. Dropped, the period
+    /// rounded up to whole buffers: 9.4 reads a second at 48 kHz / 512 and 5.9
+    /// at 4096, so the panel kept reading the same figures twice. The count
+    /// starts half a period past due, so the first buffer, and the first after
+    /// Reset, reads at once instead of showing "--" for 100 ms; the half also
+    /// keeps the reads off the buffers where the library closes a 100 ms block.
+    private let framesPerRefresh: Int
+    private var framesSinceRefresh: Int
+
+    // HISTOGRAM is not about what is measured, it is about what the library
+    // keeps. Without it every 100 ms block is malloc'd and hung on a list
+    // that is never trimmed, and the gated loudness walks that list on every
+    // buffer. Both happen on the audio thread. Measured with a steady test
+    // signal: the call took 0.030 ms after twenty minutes and
+    // 0.095 ms after an hour, and rising, against a 10.67 ms budget.
+    // tests/meter_growth.swift shows it: 30 minutes added 55 us to the slow
+    // calls without it (and 43 us before the reads were thinned out).
+    //
+    // The histogram quantises block energies into 0.1 LU bins and counts each
+    // block at its bin's centre, so it buys that with accuracy: Integrated can
+    // be off by up to 0.05 LU. On programme material the errors average out
+    // (0.025 LU at worst against an independent BS.1770 implementation). A
+    // steady tone puts every block in the same bin and shows the whole of it:
+    // the -18 dBFS calibration tone reads I = -17.950 instead of -17.993,
+    // which still shows as -18.0, but a value right at a rounding edge can
+    // move the displayed tenth. Momentary and Short-term do not use it.
+    //
+    // One constant for init and resetIntegrated, so a Reset cannot rebuild the
+    // state without it.
+    private static let mode = Int32(
+        EBUR128_MODE_M.rawValue | EBUR128_MODE_S.rawValue
+            | EBUR128_MODE_I.rawValue | EBUR128_MODE_TRUE_PEAK.rawValue
+            | EBUR128_MODE_HISTOGRAM.rawValue
+    )
 
     init?(sampleRate: UInt32, channels: UInt32) {
         self.channels = channels
-        let mode = Int32(
-            EBUR128_MODE_M.rawValue | EBUR128_MODE_S.rawValue
-                | EBUR128_MODE_I.rawValue | EBUR128_MODE_TRUE_PEAK.rawValue
-        )
-        guard let st = ebur128_init(channels, UInt(sampleRate), mode) else {
+        framesPerRefresh = max(1, Int(sampleRate) / 10)
+        framesSinceRefresh = framesPerRefresh + framesPerRefresh / 2
+        guard let st = ebur128_init(channels, UInt(sampleRate), Self.mode) else {
             return nil
         }
         state = st
     }
 
     deinit {
-        ebur128_destroy(&state)
+        // Swift runs deinit even when init? returned nil, which it does when
+        // ebur128_init refuses the sample rate, and ebur128_destroy follows
+        // the pointer without checking it. Measured: a rate of 0 or 3,000,000
+        // ended in SIGSEGV here instead of reaching the caller's error path.
+        if state != nil {
+            ebur128_destroy(&state)
+        }
+        unfairLock.deinitialize(count: 1)
+        unfairLock.deallocate()
     }
 
     /// - Parameter interleaved: float samples with the channels interleaved
     func addInterleavedFrames(_ interleaved: UnsafePointer<Float>, frameCount: Int) {
         guard frameCount > 0 else { return }
-        os_unfair_lock_lock(&unfairLock)
-        defer { os_unfair_lock_unlock(&unfairLock) }
+        os_unfair_lock_lock(unfairLock)
+        defer { os_unfair_lock_unlock(unfairLock) }
 
         guard let state else { return }
         _ = ebur128_add_frames_float(state, interleaved, frameCount)
+        framesSinceRefresh += frameCount
+        guard framesSinceRefresh >= framesPerRefresh else { return }
+        // Not -=: a buffer longer than two periods would leave it growing.
+        framesSinceRefresh %= framesPerRefresh
         refresh(state: state)
     }
 
     /// Resets the Integrated measurement (and M/S with it). libebur128 has no API
     /// to reset Integrated alone, so the state is rebuilt.
+    ///
+    /// Building the replacement and freeing the old one both happen outside the
+    /// lock, because each is a run of malloc and free and the IO thread waits on
+    /// this same lock to add its frames. Reset is a button someone presses while
+    /// listening, so the wait would be heard. Only the swap is held.
+    ///
+    /// Safe to do in two steps because this is only ever called from the main
+    /// thread: the button, and the silence timer in MeterState.
     func resetIntegrated() {
-        os_unfair_lock_lock(&unfairLock)
-        defer { os_unfair_lock_unlock(&unfairLock) }
+        os_unfair_lock_lock(unfairLock)
+        let sampleRate = state.map { UInt32($0.pointee.samplerate) }
+        os_unfair_lock_unlock(unfairLock)
+        guard let sampleRate else { return }
 
-        guard let oldState = state else { return }
-        let sampleRate = UInt32(oldState.pointee.samplerate)
-        ebur128_destroy(&state)
-        let mode = Int32(
-            EBUR128_MODE_M.rawValue | EBUR128_MODE_S.rawValue
-                | EBUR128_MODE_I.rawValue | EBUR128_MODE_TRUE_PEAK.rawValue
-        )
-        state = ebur128_init(channels, UInt(sampleRate), mode)
+        guard let fresh = ebur128_init(channels, UInt(sampleRate), Self.mode) else { return }
+
+        os_unfair_lock_lock(unfairLock)
+        var retired = state
+        state = fresh
         momentaryLUFS = -Double.infinity
         shortTermLUFS = -Double.infinity
         integratedLUFS = -Double.infinity
         truePeakDBTP = -Double.infinity
+        framesSinceRefresh = framesPerRefresh + framesPerRefresh / 2
+        os_unfair_lock_unlock(unfairLock)
+
+        ebur128_destroy(&retired)
     }
 
     /// Assumes the caller (addInterleavedFrames) already holds the lock.
