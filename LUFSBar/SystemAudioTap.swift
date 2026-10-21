@@ -46,25 +46,102 @@ final class SystemAudioTap {
     private var ioProcID: AudioDeviceIOProcID?
     private var tapDescription: CATapDescription?
 
-    // loudnessMeter is touched from the main thread (device-change listener, teardown)
-    // and from the Core Audio IO thread (handleAudio, creation and use), so swapping
-    // the reference itself is guarded by a lock. (The os_unfair_lock inside
-    private var loudnessMeterLock = os_unfair_lock()
+    // The meter is installed and let go of on the main thread and used on the
+    // Core Audio IO thread, so the reference itself is guarded by a lock.
+    /// A pointer, not a stored value: `&someProperty` passed to a C function
+    /// may be a temporary copy, and a lock that gets copied is not a lock.
+    private let loudnessMeterLock: UnsafeMutablePointer<os_unfair_lock_s> = {
+        let lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
+        lock.initialize(to: os_unfair_lock_s())
+        return lock
+    }()
     private var _loudnessMeter: LoudnessMeter?
+    /// Set while a meter is being built on the main thread, under the same lock,
+    /// so a second callback does not ask for a second one.
+    private var isBuildingLoudnessMeter = false
 
     var loudnessMeter: LoudnessMeter? {
-        os_unfair_lock_lock(&loudnessMeterLock)
-        defer { os_unfair_lock_unlock(&loudnessMeterLock) }
+        os_unfair_lock_lock(loudnessMeterLock)
+        defer { os_unfair_lock_unlock(loudnessMeterLock) }
         return _loudnessMeter
     }
 
+    /// Main thread only.
     private func setLoudnessMeter(_ meter: LoudnessMeter?) {
-        os_unfair_lock_lock(&loudnessMeterLock)
+        os_unfair_lock_lock(loudnessMeterLock)
+        let retired = _loudnessMeter
         _loudnessMeter = meter
-        os_unfair_lock_unlock(&loudnessMeterLock)
+        os_unfair_lock_unlock(loudnessMeterLock)
+        retire(retired)
     }
 
-    private var interleaveScratch: [Float32] = []
+    /// The audio thread may be holding the old meter at this very moment, and if
+    /// this was the last other reference, its own release would be the one that
+    /// frees it: a run of free() on the audio thread. Kept for a second, far
+    /// longer than any callback, so the last release happens on the main thread.
+    /// tests/realtime.sh measured 38 of 70 meters freed on the audio thread
+    /// without this.
+    private func retire(_ meter: LoudnessMeter?) {
+        guard let meter else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { withExtendedLifetime(meter) {} }
+    }
+
+    /// Asks the main thread for a meter with `channels` channels, rather than
+    /// building one here: building allocates and asks the HAL for the sample
+    /// rate, and this is called from the IOProc. Metering waits the two or
+    /// three buffers the answer takes. With `replacing`, the current meter is
+    /// swapped for the new one (the tap's layout changed under it).
+    private func requestLoudnessMeter(channels: Int, replacing: Bool, tapChannels: Int, buffers: Int) {
+        os_unfair_lock_lock(loudnessMeterLock)
+        let alreadyAsked = isBuildingLoudnessMeter
+        isBuildingLoudnessMeter = true
+        os_unfair_lock_unlock(loudnessMeterLock)
+        guard !alreadyAsked else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // The tap can be torn down while this is queued, and a meter put in
+            // afterwards would show figures nothing is feeding. stopTap() has
+            // already lowered the flag in that case.
+            guard self.ioProcID != nil else { return }
+            let sampleRate = UInt32(self.nominalSampleRate())
+            // ebur128_init only fails on a nonsense sample rate or a failed
+            // malloc. If it does, the flag stays up: lowering it would have the
+            // next callback ask again, a hundred times a second. stopTap()
+            // lowers it, so the next tap tries again.
+            guard let meter = LoudnessMeter(sampleRate: sampleRate, channels: UInt32(channels)) else {
+                Self.log.error("the meter could not be built at \(sampleRate) Hz; not trying again until the tap is rebuilt")
+                return
+            }
+            os_unfair_lock_lock(self.loudnessMeterLock)
+            // Only into an empty place, unless asked to replace: a request left
+            // over from before a rebuild can land after the new tap has one.
+            let installed = replacing || self._loudnessMeter == nil
+            var retired: LoudnessMeter?
+            if installed {
+                retired = self._loudnessMeter
+                self._loudnessMeter = meter
+            }
+            self.isBuildingLoudnessMeter = false
+            os_unfair_lock_unlock(self.loudnessMeterLock)
+            self.retire(retired)
+            guard installed else { return }
+            Self.log.notice("LoudnessMeter init sampleRate=\(sampleRate) channels=\(channels) of tapChannels=\(tapChannels) buffers=\(buffers) on the \(Thread.isMainThread ? "main" : "audio", privacy: .public) thread")
+        }
+    }
+
+    /// The level line, once a second, from the main thread. It used to be
+    /// written from inside the IO callback, and logging takes locks.
+    private var levelLogTimer: Timer?
+
+    private func logMeterLevels() {
+        guard let reading = loudnessMeter?.reading else { return }
+        Self.log.notice("M=\(String(format: "%.1f", reading.momentary), privacy: .public) S=\(String(format: "%.1f", reading.shortTerm), privacy: .public) I=\(String(format: "%.1f", reading.integrated), privacy: .public) TP=\(String(format: "%.1f", reading.truePeak), privacy: .public)")
+    }
+
+    /// Allocated once: the IO thread does not wait on an allocator. A buffer
+    /// with more frames than fit is measured in pieces.
+    private static let scratchFrames = 4096
+    private var interleaveScratch = [Float32](repeating: 0, count: scratchFrames * 2)
 
     private struct OutputDevice: Equatable {
         let id: AudioObjectID
@@ -109,8 +186,6 @@ final class SystemAudioTap {
         mElement: kAudioObjectPropertyElementMain
     )
 
-    private var callbackCount: Int = 0
-    private let logEveryNCallbacks = 40  // thinned out to avoid flooding the log
 
     func start() {
         // A second start would overwrite tapID and aggregateID, leaking the tap that
@@ -142,6 +217,10 @@ final class SystemAudioTap {
         _ = Self.meterHoldMicroseconds
         meterDropTimer?.invalidate()
         meterDropTimer = nil
+        levelLogTimer?.invalidate()
+        levelLogTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.logMeterLevels()
+        }
         if let ms = TestSwitch.number("LUFSBAR_DROP_METER_EVERY_MS", limit: 60_000) {
             Self.log.error("dropping the meter on purpose every \(ms) ms")
             meterDropTimer = Timer.scheduledTimer(withTimeInterval: ms / 1000, repeats: true) { [weak self] _ in
@@ -272,6 +351,8 @@ final class SystemAudioTap {
         }
         meterDropTimer?.invalidate()
         meterDropTimer = nil
+        levelLogTimer?.invalidate()
+        levelLogTimer = nil
         stopTap()
     }
 
@@ -297,6 +378,11 @@ final class SystemAudioTap {
             tapID = kAudioObjectUnknown
         }
         setLoudnessMeter(nil)
+        // A request still queued finds no IOProc and gives up; one that failed
+        // left this up on purpose. Either way the next tap may ask again.
+        os_unfair_lock_lock(loudnessMeterLock)
+        isBuildingLoudnessMeter = false
+        os_unfair_lock_unlock(loudnessMeterLock)
     }
 
     /// Resets the Integrated measurement (called from the reset button in the popover).
@@ -416,95 +502,60 @@ final class SystemAudioTap {
         return (2, pair.left, pair.right)
     }
 
-    @discardableResult
-    private func setupLoudnessMeter(abl: UnsafeMutableAudioBufferListPointer) -> LoudnessMeter? {
-        let available = Self.availableChannels(in: abl)
-        let measured = measuredChannels(available: available)
-        guard measured.count > 0 else { return nil }
-        let sampleRate = UInt32(nominalSampleRate())
-        let meter = LoudnessMeter(sampleRate: sampleRate, channels: UInt32(measured.count))
-        setLoudnessMeter(meter)
-        guard meter != nil else { return nil }
-        Self.log.notice("LoudnessMeter init sampleRate=\(sampleRate) channels=\(measured.count) of tapChannels=\(available) nonInterleavedBuffers=\(abl.count) on the \(Thread.isMainThread ? "main" : "audio", privacy: .public) thread")
-        return meter
-    }
-
     private func handleAudio(_ bufferList: UnsafePointer<AudioBufferList>) {
         let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
         guard abl.count > 0 else { return }
 
-        var meter = loudnessMeter
-        if meter == nil {
-            meter = setupLoudnessMeter(abl: abl)
-        }
-        guard let meter else { return }
-
-        // The meter reads `channels` samples per frame. If the device changed its
-        // layout under the same tap, feeding it the new layout would make it read
-        // past what was copied, so it is dropped and built again for the new one.
         let available = Self.availableChannels(in: abl)
         let (measured, left, right) = measuredChannels(available: available)
         guard measured > 0 else { return }
+
+        guard let meter = loudnessMeter else {
+            requestLoudnessMeter(channels: measured, replacing: false, tapChannels: available, buffers: abl.count)
+            return
+        }
+        // The meter reads `channels` samples per frame. If the device changed its
+        // layout under the same tap, feeding it the new layout would make it read
+        // past what was copied, so a meter for the new one is asked for instead.
         guard measured == Int(meter.channels) else {
-            setLoudnessMeter(nil)
+            requestLoudnessMeter(channels: measured, replacing: true, tapChannels: available, buffers: abl.count)
             return
         }
         if Self.meterHoldMicroseconds > 0 { usleep(Self.meterHoldMicroseconds) }
 
-        if abl.count == 1 {
-            // A single interleaved buffer carrying every channel of the stream.
-            // The measured channels of each frame are copied into scratch.
-            guard let buffer = abl.first, let data = buffer.mData else { return }
-            let frameCount = Int(buffer.mDataByteSize) / (MemoryLayout<Float32>.size * available)
-            guard frameCount > 0 else { return }
-            let samples = data.bindMemory(to: Float32.self, capacity: frameCount * available)
+        // The measured channels are copied into scratch, interleaved, a piece at
+        // a time if the buffer holds more frames than the scratch does. Either
+        // one interleaved buffer carrying every channel of the stream, or one
+        // buffer per channel (measuredChannels keeps left and right below
+        // abl.count).
+        let interleaved = abl.count == 1
+        let channelStride = interleaved ? available : 1
+        let leftBuffer = interleaved ? abl[0] : abl[left]
+        let rightBuffer = interleaved ? abl[0] : abl[right]
+        guard let leftData = leftBuffer.mData, let rightData = rightBuffer.mData else { return }
+        let frameCount = min(
+            Int(leftBuffer.mDataByteSize) / (MemoryLayout<Float32>.size * channelStride),
+            Int(rightBuffer.mDataByteSize) / (MemoryLayout<Float32>.size * channelStride)
+        )
+        guard frameCount > 0 else { return }
+        let leftSamples = leftData.assumingMemoryBound(to: Float32.self) + (interleaved ? left : 0)
+        let rightSamples = rightData.assumingMemoryBound(to: Float32.self) + (interleaved ? right : 0)
 
-            let needed = frameCount * measured
-            if interleaveScratch.count < needed {
-                interleaveScratch = [Float32](repeating: 0, count: needed)
-            }
-            interleaveScratch.withUnsafeMutableBufferPointer { scratch in
-                guard let dst = scratch.baseAddress else { return }
-                for frame in 0..<frameCount {
-                    dst[frame * measured] = samples[frame * available + left]
+        interleaveScratch.withUnsafeMutableBufferPointer { scratch in
+            guard let dst = scratch.baseAddress else { return }
+            var done = 0
+            while done < frameCount {
+                let frames = min(frameCount - done, Self.scratchFrames)
+                for frame in 0..<frames {
+                    let source = (done + frame) * channelStride
+                    dst[frame * measured] = leftSamples[source]
                     if measured == 2 {
-                        dst[frame * 2 + 1] = samples[frame * available + right]
+                        dst[frame * 2 + 1] = rightSamples[source]
                     }
                 }
-                meter.addInterleavedFrames(dst, frameCount: frameCount)
-            }
-        } else {
-            // One buffer per channel: the measured ones are interleaved.
-            // (measuredChannels keeps left and right below abl.count.)
-            let frameCount = Int(abl[left].mDataByteSize) / MemoryLayout<Float32>.size
-            guard frameCount > 0, let leftData = abl[left].mData else { return }
-            var rightData: UnsafeMutableRawPointer?
-            if measured == 2 {
-                guard Int(abl[right].mDataByteSize) / MemoryLayout<Float32>.size >= frameCount,
-                      let data = abl[right].mData else { return }
-                rightData = data
-            }
-
-            let needed = frameCount * measured
-            if interleaveScratch.count < needed {
-                interleaveScratch = [Float32](repeating: 0, count: needed)
-            }
-            let leftSamples = leftData.bindMemory(to: Float32.self, capacity: frameCount)
-            let rightSamples = rightData?.bindMemory(to: Float32.self, capacity: frameCount)
-            interleaveScratch.withUnsafeMutableBufferPointer { scratch in
-                guard let dst = scratch.baseAddress else { return }
-                for frame in 0..<frameCount {
-                    dst[frame * measured] = leftSamples[frame]
-                    if let rightSamples {
-                        dst[frame * 2 + 1] = rightSamples[frame]
-                    }
-                }
-                meter.addInterleavedFrames(dst, frameCount: frameCount)
+                meter.addInterleavedFrames(dst, frameCount: frames)
+                done += frames
             }
         }
-
-        callbackCount += 1
-        guard callbackCount % logEveryNCallbacks == 0 else { return }
-        Self.log.notice("M=\(String(format: "%.1f", meter.momentaryLUFS), privacy: .public) S=\(String(format: "%.1f", meter.shortTermLUFS), privacy: .public) I=\(String(format: "%.1f", meter.integratedLUFS), privacy: .public) TP=\(String(format: "%.1f", meter.truePeakDBTP), privacy: .public)")
     }
 }

@@ -194,10 +194,12 @@ final class MeterState: ObservableObject {
             }
             return
         }
-        momentaryLUFS = meter.momentaryLUFS
-        shortTermLUFS = meter.shortTermLUFS
-        integratedLUFS = meter.integratedLUFS
-        truePeakDBTP = meter.truePeakDBTP
+        // One locked read: the audio thread writes these as it refreshes.
+        let reading = meter.reading
+        momentaryLUFS = reading.momentary
+        shortTermLUFS = reading.shortTerm
+        integratedLUFS = reading.integrated
+        truePeakDBTP = reading.truePeak
 
         if momentaryLUFS.isFinite {
             hasEverCapturedRealAudio = true

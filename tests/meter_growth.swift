@@ -40,5 +40,5 @@ let early = minuteP95[1], late = minuteP95[minutes - 1]
 let ok = late - early <= 10
 print(String(format: "%6.0f Hz /%4d, %d min: slow calls (p95) minute 2 %.1f us, minute %d %.1f us (%+.1f us) %@  I=%.3f",
              rate, frames, minutes, early, minutes, late, late - early, ok ? "PASS" : "FAIL (want +10 us or less)",
-             meter.integratedLUFS))
+             meter.reading.integrated))
 exit(ok ? 0 : 1)

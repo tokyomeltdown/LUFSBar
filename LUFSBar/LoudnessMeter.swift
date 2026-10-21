@@ -6,10 +6,27 @@ final class LoudnessMeter {
     private var state: UnsafeMutablePointer<ebur128_state>?
     let channels: UInt32
 
-    private(set) var momentaryLUFS: Double = -Double.infinity
-    private(set) var shortTermLUFS: Double = -Double.infinity
-    private(set) var integratedLUFS: Double = -Double.infinity
-    private(set) var truePeakDBTP: Double = -Double.infinity
+    private var momentaryLUFS: Double = -Double.infinity
+    private var shortTermLUFS: Double = -Double.infinity
+    private var integratedLUFS: Double = -Double.infinity
+    private var truePeakDBTP: Double = -Double.infinity
+
+    /// The four figures from one refresh, read under the lock: the only way to
+    /// read them, because the audio thread writes them. Read one by one they
+    /// could come from different refreshes, and each read raced that write.
+    struct Reading {
+        let momentary: Double
+        let shortTerm: Double
+        let integrated: Double
+        let truePeak: Double
+    }
+
+    var reading: Reading {
+        os_unfair_lock_lock(unfairLock)
+        defer { os_unfair_lock_unlock(unfairLock) }
+        return Reading(momentary: momentaryLUFS, shortTerm: shortTermLUFS,
+                       integrated: integratedLUFS, truePeak: truePeakDBTP)
+    }
 
     // addInterleavedFrames() is called from the Core Audio realtime IO thread,
     // resetIntegrated() from a Timer on the main thread. Without a lock around

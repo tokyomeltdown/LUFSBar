@@ -20,18 +20,18 @@ func feed() {
 }
 // One second to settle, then count.
 for _ in 0..<(Int(rate) / frames) { feed() }
-var last = meter.momentaryLUFS, changes = 0
+var last = meter.reading.momentary, changes = 0
 let counted = Int(10 * rate) / frames
 for _ in 0..<counted {
     feed()
-    if meter.momentaryLUFS != last { changes += 1; last = meter.momentaryLUFS }
+    if meter.reading.momentary != last { changes += 1; last = meter.reading.momentary }
 }
 let seconds = Double(counted * frames) / rate
 let hz = Double(changes) / seconds
 let rateOK = hz >= 9.9 && hz <= 10.1
 meter.resetIntegrated()
 feed()
-let afterReset = meter.momentaryLUFS
+let afterReset = meter.reading.momentary
 let resetOK = afterReset.isFinite
 print(String(format: "%6.0f Hz /%4d: %.2f refreshes a second %@; Momentary after Reset + 1 buffer = %.1f %@",
              rate, frames, hz, rateOK ? "PASS" : "FAIL (want 10)", afterReset, resetOK ? "PASS" : "FAIL (want a number)"))
