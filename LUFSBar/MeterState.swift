@@ -129,8 +129,15 @@ final class MeterState: ObservableObject {
     private var hasAutoResetForCurrentSilence = false
     private let silenceResetThresholdPolls = 20  // 0.1s x 20 = about 2 seconds
 
+    // How many times objectWillChange fired, logged every 10 s, so a test can see
+    // how often the views are told to redraw.
+    private var publishCount = 0
+    private var publishCountPolls = 0
+    private var publishCounter: AnyCancellable?
+
     init() {
         compactMenuBar = UserDefaults.standard.bool(forKey: Self.compactMenuBarKey)
+        publishCounter = objectWillChange.sink { [weak self] _ in self?.publishCount += 1 }
     }
 
     func startPolling() {
@@ -185,6 +192,12 @@ final class MeterState: ObservableObject {
     }
 
     private func refresh() {
+        publishCountPolls += 1
+        if publishCountPolls >= 100 {
+            Self.log.notice("published \(self.publishCount) changes in the last \(self.publishCountPolls) polls")
+            publishCount = 0
+            publishCountPolls = 0
+        }
         guard let meter = SystemAudioTap.shared.loudnessMeter else {
             noteNoAudioYet()
             displaySmoothedValue = -Double.infinity

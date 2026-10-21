@@ -134,9 +134,32 @@ final class SystemAudioTap {
     private var levelLogTimer: Timer?
 
     private func logMeterLevels() {
-        guard let reading = loudnessMeter?.reading else { return }
-        Self.log.notice("M=\(String(format: "%.1f", reading.momentary), privacy: .public) S=\(String(format: "%.1f", reading.shortTerm), privacy: .public) I=\(String(format: "%.1f", reading.integrated), privacy: .public) TP=\(String(format: "%.1f", reading.truePeak), privacy: .public)")
+        // What the meter holds, and what the app is showing: the menu bar text,
+        // the popover's four figures and the metric in the menu bar. The second
+        // half is what a person sees, so the display tests read it from here.
+        let state = MeterState.shared
+        let shown = "shown=\"\(state.menuBarText)\" popover=\(Self.figure(state.momentaryLUFS))/\(Self.figure(state.shortTermLUFS))/\(Self.figure(state.integratedLUFS))/\(Self.figure(state.truePeakDBTP)) metric=\(state.menuBarMetric)"
+        if let reading = loudnessMeter?.reading {
+            Self.log.notice("M=\(Self.figure(reading.momentary), privacy: .public) S=\(Self.figure(reading.shortTerm), privacy: .public) I=\(Self.figure(reading.integrated), privacy: .public) TP=\(Self.figure(reading.truePeak), privacy: .public) \(shown, privacy: .public)")
+        } else {
+            Self.log.notice("M=-- S=-- I=-- TP=-- \(shown, privacy: .public)")
+        }
     }
+
+    private static func figure(_ value: Double) -> String {
+        value.isFinite ? String(format: "%.1f", value) : "--"
+    }
+
+    /// LUFSBAR_STALL_AFTER_SECONDS = n: test only. n seconds after the tap
+    /// starts, the IOProc stops feeding the meter, which is what it looks like
+    /// from here when the bound device sleeps or is unplugged. Zero means never.
+    private var stallAtTicks: UInt64 = 0
+
+    private static let nanosecondsPerTick: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return Double(info.numer) / Double(info.denom)
+    }()
 
     /// Allocated once: the IO thread does not wait on an allocator. A buffer
     /// with more frames than fit is measured in pieces.
@@ -215,6 +238,11 @@ final class SystemAudioTap {
         // n ms the way a device change does, so the next callback needs a new
         // one. Used with LUFSBAR_METER_HOLD_MS.
         _ = Self.meterHoldMicroseconds
+        stallAtTicks = 0
+        if let seconds = TestSwitch.number("LUFSBAR_STALL_AFTER_SECONDS", limit: 86_400) {
+            stallAtTicks = mach_absolute_time() + UInt64(seconds * 1_000_000_000 / Self.nanosecondsPerTick)
+            Self.log.error("stalling on purpose \(seconds) s after the tap starts")
+        }
         meterDropTimer?.invalidate()
         meterDropTimer = nil
         levelLogTimer?.invalidate()
@@ -505,6 +533,8 @@ final class SystemAudioTap {
     private func handleAudio(_ bufferList: UnsafePointer<AudioBufferList>) {
         let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
         guard abl.count > 0 else { return }
+        // Test only: behaves as though the callbacks had stopped coming.
+        if stallAtTicks != 0, mach_absolute_time() > stallAtTicks { return }
 
         let available = Self.availableChannels(in: abl)
         let (measured, left, right) = measuredChannels(available: available)

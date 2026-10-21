@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import os
 
 // SwiftUI MenuBarExtra recalculates the NSStatusItem width from the title
 // string, so every time the number of digits changed AppKit quietly relaid
@@ -8,6 +9,7 @@ import Combine
 // Creating the NSStatusItem directly with a fixed width, and updating the
 // title inside a CATransaction with animations disabled, stops that entirely.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "app")
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var cancellable: AnyCancellable?
@@ -79,6 +81,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.statusItem?.length = compact ? Self.compactStatusItemWidth : Self.statusItemWidth
             }
 
+        // Test only, for when the menu bar item cannot be clicked (hidden behind
+        // the notch, or turned off in System Settings > Menu Bar):
+        //   LUFSBAR_OPEN_MENU_AFTER_SECONDS = n      opens the right-click menu,
+        //                                            which closes itself 8 s later
+        //   LUFSBAR_MENU_CHOOSE = <item title>       and picks that item as it closes
+        //   LUFSBAR_OPEN_SETTINGS_AFTER_SECONDS = n  opens the Settings window
+        if let seconds = TestSwitch.number("LUFSBAR_OPEN_MENU_AFTER_SECONDS", limit: 3600) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                guard let button = self?.statusItem?.button else { return }
+                self?.showMetricMenu(from: button)
+            }
+        }
+        if let seconds = TestSwitch.number("LUFSBAR_OPEN_SETTINGS_AFTER_SECONDS", limit: 3600) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in self?.showSettings() }
+        }
+
         if isFirstLaunch, let button = item.button {
             NSApp.activate(ignoringOtherApps: true)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -128,7 +146,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         compactItem.state = MeterState.shared.compactMenuBar ? .on : .off
         menu.addItem(compactItem)
 
+        Self.log.notice("right-click menu opened")
+        if TestSwitch.number("LUFSBAR_OPEN_MENU_AFTER_SECONDS", limit: 3600) != nil {
+            // In the common modes, so it fires while the menu is tracking.
+            let choice = ProcessInfo.processInfo.environment["LUFSBAR_MENU_CHOOSE"]
+            let close = Timer(timeInterval: 8, repeats: false) { _ in
+                if let choice, let index = menu.items.firstIndex(where: { $0.title == choice }) {
+                    menu.performActionForItem(at: index)
+                }
+                menu.cancelTracking()
+            }
+            RunLoop.main.add(close, forMode: .common)
+        }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+        Self.log.notice("right-click menu closed")
     }
 
     @objc private func selectMetric(_ sender: NSMenuItem) {

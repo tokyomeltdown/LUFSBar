@@ -11,8 +11,17 @@ enum LaunchAtLogin {
         SMAppService.mainApp.status == .enabled
     }
 
+    /// LUFSBAR_FAIL_LAUNCH_AT_LOGIN = 1: test only. Changing the setting fails
+    /// before the system is asked, so a test can see what the toggle does then
+    /// without touching the real login item.
+    private static let failOnPurpose = ProcessInfo.processInfo.environment["LUFSBAR_FAIL_LAUNCH_AT_LOGIN"] == "1"
+
     static func setEnabled(_ enabled: Bool) {
         do {
+            if failOnPurpose {
+                log.error("Launch at Login: failing on purpose")
+                throw CocoaError(.featureUnsupported)
+            }
             if enabled {
                 if SMAppService.mainApp.status != .enabled {
                     try SMAppService.mainApp.register()
