@@ -55,7 +55,7 @@ cd LUFSBar
 bash build.sh
 ```
 
-Requires Xcode 16+.
+Requires Xcode 16+. Without the author's signing certificate, `build.sh` signs the app ad hoc, so macOS asks for System Audio Recording permission again after each rebuild.
 
 ## License
 

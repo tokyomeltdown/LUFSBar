@@ -9,40 +9,17 @@
 # ============================================================
 set -e
 
-# Work folders live in the per-user temporary folder (private to this account)
-# rather than at fixed names in the shared /tmp, where another account could
-# have put a folder or a link first. Either way they are outside the synced
-# project folder, which is what codesign needs (see Step 2). Asked of getconf
-# rather than taken from $TMPDIR, so that this and make_pkg.sh agree even when
-# they are started from different shells. LUFSBAR_RELEASE_DIR overrides it.
-RELEASE_DIR="${LUFSBAR_RELEASE_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
-RELEASE_DIR="${RELEASE_DIR%/}/LUFSBar-release"
+# Name, version, work folder and signing identity: see release_settings.sh.
+source "$(cd "$(dirname "$0")" && pwd)/release_settings.sh"
 WORK_DIR="$RELEASE_DIR/notarize"
 # The last run's signed app goes first, before any check below can stop this
 # run: left behind, make_pkg.sh would wrap it as though it were this build.
 rm -rf "$WORK_DIR"
 
-# ---- Settings (specific to this machine and account) ----
-# The signing identity names the Apple account and the team it belongs to.
-# Every signed copy carries it, so it is not much of a secret, but AGENTS.md
-# section 3 keeps values of that kind out of the source. It is read from the
-# environment, or from one line in a file outside the tree.
-SIGNER_FILE="$HOME/.config/tokyomeltdown/signer"
-if [ -z "${SIGNER:-}" ] && [ -f "$SIGNER_FILE" ]; then
-    SIGNER="$(head -1 "$SIGNER_FILE")"
-fi
-if [ -z "${SIGNER:-}" ]; then
-    echo "ERROR: no signing identity."
-    echo "Put the account name and team on one line in $SIGNER_FILE"
-    exit 1
-fi
+load_signer
 SIGN_ID="Developer ID Application: $SIGNER"
-NOTARY_PROFILE="VOXNotary"
-APP_NAME="LUFSBar"
-VERSION="1.1"
 
 # ---- Paths ----
-ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$RELEASE_DIR/build"
 APP_BUILT="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 ENTITLEMENTS="$ROOT/LUFSBar/LUFSBar.entitlements"
@@ -93,7 +70,7 @@ if [ ! -x "$APP_BUILT/Contents/MacOS/$APP_NAME" ]; then
 fi
 BUILT_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_BUILT/Contents/Info.plist")"
 if [ "$BUILT_VERSION" != "$VERSION" ]; then
-    echo "  ERROR: the build is version $BUILT_VERSION, but VERSION here is $VERSION."
+    echo "  ERROR: the build is version $BUILT_VERSION, but the project says $VERSION."
     exit 1
 fi
 

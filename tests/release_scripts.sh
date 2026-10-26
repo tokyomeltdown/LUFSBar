@@ -11,12 +11,14 @@
 #   4  make_pkg.sh refuses an app that is not stapled                (S1)
 #   5  the package does not let Installer relocate the app           (B3)
 #   6  the work folders are not fixed paths in the shared /tmp       (S1)
+#   7  the version comes from the Xcode project alone: with only        (M4)
+#      MARKETING_VERSION changed, both scripts build and package that version
 #
 # Before the fix the scripts ignore LUFSBAR_RELEASE_DIR and use /tmp/LUFSBar_*,
 # so after running this against them, remove what it left there.
 #
 # Usage: release_scripts.sh
-# Takes a few minutes (two Release builds). Leaves nothing in the repository.
+# Takes a few minutes (three Release builds). Leaves nothing in the repository.
 
 set -u
 REPO=${0:A:h}/..
@@ -58,7 +60,11 @@ chmod +x $STUBS/*
 # the default place is left alone.
 export PATH=$STUBS:$PATH SIGNER="Test (TEST)" LUFSBAR_RELEASE_DIR=$WORK/release
 
-VERSION=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' $COPY/notarize.sh)
+# The version the project builds, which is what the scripts must package.
+project_version() {
+    sed -n 's/^[[:space:]]*MARKETING_VERSION = \(.*\);$/\1/p' $1/LUFSBar.xcodeproj/project.pbxproj | sort -u
+}
+VERSION=$(project_version $COPY)
 PKG=$COPY/dist/LUFSBar_$VERSION.pkg
 result() { print "$1  $2"; [[ $1 == FAIL ]] && FAILED=1; }
 # Packages from an earlier run, which a refused run must not leave behind: the
@@ -135,6 +141,22 @@ if (( STATUS != 0 )) && no_packages; then
     result PASS "3 make_pkg.sh refused what the failed run left behind"
 else
     result FAIL "3 make_pkg.sh (exit $STATUS) wrapped the app from an earlier run, or left an old package"
+fi
+
+# 7. A second copy with nothing changed but MARKETING_VERSION.
+COPY7=$WORK/repo7
+mkdir -p $COPY7
+(cd $REPO && { git ls-files -z; git ls-files -z --others --exclude-standard; } | xargs -0 tar -cf - ) | tar -xf - -C $COPY7
+sed -i '' 's/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = 9.9.9;/' $COPY7/LUFSBar.xcodeproj/project.pbxproj
+LUFSBAR_RELEASE_DIR=$WORK/release7 bash $COPY7/notarize.sh > $WORK/notarize-999.log 2>&1
+N_STATUS=$?
+LUFSBAR_RELEASE_DIR=$WORK/release7 bash $COPY7/make_pkg.sh > $WORK/make_pkg-999.log 2>&1
+PKG7=$COPY7/dist/LUFSBar_9.9.9.pkg
+if [[ -f $PKG7 ]] && pkgutil --expand $PKG7 $WORK/expanded7 >/dev/null 2>&1 \
+   && grep -q 'version="9.9.9"' $WORK/expanded7/PackageInfo; then
+    result PASS "7 with only MARKETING_VERSION set to 9.9.9, the scripts made LUFSBar_9.9.9.pkg"
+else
+    result FAIL "7 with only MARKETING_VERSION set to 9.9.9: notarize.sh exit $N_STATUS, no 9.9.9 package (see $WORK/notarize-999.log)"
 fi
 
 exit $FAILED

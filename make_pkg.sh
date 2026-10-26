@@ -7,29 +7,11 @@
 # ============================================================
 set -e
 
-# The signing identity names the Apple account and the team it belongs to.
-# Every signed copy carries it, so it is not much of a secret, but AGENTS.md
-# section 3 keeps values of that kind out of the source. It is read from the
-# environment, or from one line in a file outside the tree.
-SIGNER_FILE="$HOME/.config/tokyomeltdown/signer"
-if [ -z "${SIGNER:-}" ] && [ -f "$SIGNER_FILE" ]; then
-    SIGNER="$(head -1 "$SIGNER_FILE")"
-fi
-if [ -z "${SIGNER:-}" ]; then
-    echo "ERROR: no signing identity."
-    echo "Put the account name and team on one line in $SIGNER_FILE"
-    exit 1
-fi
+# Name, version, work folder and signing identity: see release_settings.sh.
+source "$(cd "$(dirname "$0")" && pwd)/release_settings.sh"
+load_signer
 SIGN_INST="Developer ID Installer: $SIGNER"
-NOTARY_PROFILE="VOXNotary"
-APP_NAME="LUFSBar"
-VERSION="1.1"
-BUNDLE_ID="com.tokyomeltdown.lufsbar"
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-# The same per-user work folder notarize.sh uses (see there).
-RELEASE_DIR="${LUFSBAR_RELEASE_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
-RELEASE_DIR="${RELEASE_DIR%/}/LUFSBar-release"
 APP_TMP="$RELEASE_DIR/notarize/$APP_NAME.app"
 WORK="$RELEASE_DIR/pkg"
 DIST_DIR="$ROOT/dist"
@@ -62,7 +44,7 @@ echo "[0/5] check the app's version and its notarization ..."
 APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_TMP/Contents/Info.plist")"
 if [ "$APP_VERSION" != "$VERSION" ]; then
     echo "ERROR: $APP_TMP is version $APP_VERSION, not $VERSION."
-    echo "Run bash notarize.sh again, or fix VERSION here."
+    echo "Run bash notarize.sh again (the version comes from MARKETING_VERSION)."
     exit 1
 fi
 if ! xcrun stapler validate "$APP_TMP"; then
