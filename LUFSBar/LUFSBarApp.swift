@@ -65,18 +65,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ))
         popover = pop
 
+        // Straight through, not .receive(on: DispatchQueue.main): menuBarText is
+        // only ever set on the main thread already, and the main queue is not
+        // served while the right-click menu is open, so the menu bar stood still
+        // for as long as the menu was showing.
         cancellable = MeterState.shared.$menuBarText
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] text in
                 guard let button = self?.statusItem?.button else { return }
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 button.title = text
                 CATransaction.commit()
+                MeterState.shared.appliedMenuBarTitle = text
             }
 
         compactModeCancellable = MeterState.shared.$compactMenuBar
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] compact in
                 self?.statusItem?.length = compact ? Self.compactStatusItemWidth : Self.statusItemWidth
             }
@@ -180,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "LUFSBar Settings"
+            window.title = SettingsView.windowTitle
             window.contentViewController = NSHostingController(rootView: SettingsView())
             window.isReleasedWhenClosed = false
             window.center()

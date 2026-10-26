@@ -7,7 +7,7 @@
 #   2  the menu bar metric chosen in the right-click menu is kept     (B9)
 #      across a relaunch
 #   3  the meter keeps going while the right-click menu is open       (B10)
-#   4  with nothing changing, the views are not told to redraw        (M2)
+#   4  in steady silence, the views are not told to redraw            (M2)
 #   5  a Launch at Login change that fails puts the toggle back       (B8)
 #
 # The menu bar item may be hidden (behind the notch, or turned off in System
@@ -49,16 +49,22 @@ if pgrep -x LUFSBar >/dev/null || pgrep -x "LUFSBar Pro" >/dev/null; then
 fi
 defaults delete $DOMAIN menuBarMetric 2>/dev/null
 
-# 1. The tap stops being fed 6 s after it starts, with the tone still playing
-# (three times five seconds, back to back).
+# 1. The tap stops being fed 6 s after its first callback, with the tone still
+# playing (three times five seconds, back to back). Timed from the meter being
+# built, since the device can take seconds to start.
+SINCE=$(mark)
 launch --env LUFSBAR_STALL_AFTER_SECONDS=6
 { afplay "$TONE"; afplay "$TONE"; afplay "$TONE" } & afplay_pid=$!
-sleep 2; BEFORE=$(mark); sleep 7; AFTER=$(mark); sleep 3
-LIVE=$(level_lines "$BEFORE" | head -2 | tail -1)
-STALE=$(level_lines "$AFTER" | tail -1)
+applog_wait "$SINCE" 15 "LoudnessMeter init"
+sleep 3
+LIVE=$(level_lines "$SINCE" | tail -1)
+sleep 6
+STALE=$(level_lines "$SINCE" | tail -1)
 wait $afplay_pid
 quit_app
-if [[ $LIVE == *'shown="-'[0-9]* && $STALE == *'shown="--'* && $STALE == *'popover=--/--/--/--'* ]]; then
+# The menu bar text is padded on the left with no-break spaces (U+00A0), not
+# ASCII ones, so whatever comes before the figure is skipped.
+if [[ $LIVE =~ 'shown="[^"0-9-]*-[0-9]' && $STALE =~ 'shown="[^"0-9-]*--' && $STALE == *'popover=--/--/--/--'* ]]; then
     result PASS "1 after the callbacks stopped, the menu bar and popover show --"
 else
     result FAIL "1 while playing: ${LIVE##* M=}; after stopping: ${STALE##* M=}"
@@ -94,24 +100,29 @@ OPEN=$(print -r -- $LOG3 | grep "right-click menu opened" | head -1 | awk '{prin
 CLOSED=$(print -r -- $LOG3 | grep "right-click menu closed" | head -1 | awk '{print $2}')
 DURING=$(print -r -- $LOG3 | grep " M=" | awk -v a=$OPEN -v b=$CLOSED '$2 > a && $2 < b')
 COUNT=$(print -r -- $DURING | grep -c "M=")
-NUMBERS=$(print -r -- $DURING | grep -c 'shown="-[0-9]')
-if (( COUNT >= 6 && NUMBERS >= 2 )); then
-    result PASS "3 with the menu open for 8 s: $COUNT level lines, $NUMBERS of them showing a number"
+# What the menu bar item itself was showing, not only the model behind it:
+# changing titles while the menu is open means the reading kept moving on screen.
+NUMBERS=$(print -r -- $DURING | grep -c 'shown="[^"0-9-]*-[0-9]')
+TITLES=$(print -r -- $DURING | sed -n 's/.* title="\([^"]*\)".*/\1/p' | sort -u | wc -l | tr -d ' ')
+if (( COUNT >= 6 && NUMBERS >= 2 && TITLES >= 3 )); then
+    result PASS "3 with the menu open for 8 s: $COUNT level lines, $NUMBERS showing a number, $TITLES different menu bar titles"
 else
-    result FAIL "3 with the menu open for 8 s: $COUNT level lines (want 6 or more), $NUMBERS showing a number (want 2 or more)"
+    result FAIL "3 with the menu open for 8 s: $COUNT level lines (want 6+), $NUMBERS showing a number (want 2+), $TITLES different menu bar titles (want 3+)"
 fi
 
-# 4. A few seconds of tone, then silence: count redraws in the quiet.
+# 4. A few seconds of tone, then silence. The first 10 s window after the tone
+# still holds real changes (short-term decaying over its 3 s, the automatic
+# reset), so the count is read from a window that is silent throughout.
 launch
 afplay "$TONE"
-sleep 4; QUIET=$(mark); sleep 22
+QUIET=$(mark); sleep 32
 COUNTS=($(applog_since "$QUIET" | sed -n 's/.*published \([0-9]*\) changes.*/\1/p'))
 quit_app
-WORST=0; for c in $COUNTS; do (( c > WORST )) && WORST=$c; done
-if (( ${#COUNTS} >= 1 && WORST <= 10 )); then
-    result PASS "4 in silence, at most $WORST redraws per 10 s"
+STEADY=${COUNTS[-1]:-none}
+if (( ${#COUNTS} >= 3 )) && (( STEADY <= 2 )); then
+    result PASS "4 in steady silence, $STEADY redraws per 10 s (counts: ${COUNTS})"
 else
-    result FAIL "4 in silence, ${WORST} redraws per 10 s (want 10 or fewer; counts: ${COUNTS:-none})"
+    result FAIL "4 in steady silence, $STEADY redraws per 10 s (want 2 or fewer; counts: ${COUNTS:-none})"
 fi
 
 # 5. Press Launch at Login with the change set to fail.

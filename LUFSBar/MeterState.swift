@@ -4,10 +4,12 @@ import Combine
 
 // Polls the LoudnessMeter in SystemAudioTap roughly every 100ms and turns
 // the result into the text shown in the menu bar.
-enum MenuBarMetric: Equatable {
-    case momentary
-    case shortTerm
-    case integrated
+/// The raw values are what is stored in the user defaults, so they are spelt out
+/// rather than left to follow the case names.
+enum MenuBarMetric: String, Equatable {
+    case momentary = "momentary"
+    case shortTerm = "shortTerm"
+    case integrated = "integrated"
 }
 
 /// A snapshot of I/S/TP at one moment, saved with a single click.
@@ -76,9 +78,13 @@ final class MeterState: ObservableObject {
     private var neverCapturedPollCount = 0
     private let possiblyMissingAudioAccessThresholdPolls = 900  // 0.1s x 900 = about 90 seconds
 
-    // Which figure is shown live in the menu bar. Switchable from the right-click menu.
+    // Which figure is shown live in the menu bar. Switchable from the right-click menu,
+    // and kept across launches (1.1 forgot it and came back on Short-term).
+    private static let menuBarMetricKey = "menuBarMetric"
     @Published var menuBarMetric: MenuBarMetric = .shortTerm {
         didSet {
+            guard oldValue != menuBarMetric else { return }
+            UserDefaults.standard.set(menuBarMetric.rawValue, forKey: Self.menuBarMetricKey)
             // Reset the smoothing, so switching does not briefly blend the new figure with the
             // old one and show something nonsensical.
             displaySmoothedValue = -Double.infinity
@@ -129,6 +135,11 @@ final class MeterState: ObservableObject {
     private var hasAutoResetForCurrentSilence = false
     private let silenceResetThresholdPolls = 20  // 0.1s x 20 = about 2 seconds
 
+    /// The text last put into the menu bar item itself, which is not always
+    /// menuBarText: it is copied there by a subscriber. Logged in the level line,
+    /// so a test can see what is actually on screen.
+    var appliedMenuBarTitle = ""
+
     // How many times objectWillChange fired, logged every 10 s, so a test can see
     // how often the views are told to redraw.
     private var publishCount = 0
@@ -137,14 +148,23 @@ final class MeterState: ObservableObject {
 
     init() {
         compactMenuBar = UserDefaults.standard.bool(forKey: Self.compactMenuBarKey)
+        if let stored = UserDefaults.standard.string(forKey: Self.menuBarMetricKey),
+           let metric = MenuBarMetric(rawValue: stored) {
+            menuBarMetric = metric
+        }
         publishCounter = objectWillChange.sink { [weak self] _ in self?.publishCount += 1 }
     }
 
     func startPolling() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // In the common modes, so the meter keeps going while a menu is open: in
+        // the default mode alone it stopped for as long as the right-click menu was
+        // showing.
+        let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+        RunLoop.main.add(poll, forMode: .common)
+        timer = poll
     }
 
     func stopPolling() {
@@ -198,8 +218,15 @@ final class MeterState: ObservableObject {
             publishCount = 0
             publishCountPolls = 0
         }
-        guard let meter = SystemAudioTap.shared.loudnessMeter else {
+        // A meter that is no longer being fed keeps its last figures, and those look
+        // exactly like a live reading. Treated the same as having no meter at all,
+        // in the popover as well as the menu bar.
+        guard let meter = SystemAudioTap.shared.loudnessMeter, SystemAudioTap.shared.isDelivering else {
             noteNoAudioYet()
+            if momentaryLUFS.isFinite { momentaryLUFS = -Double.infinity }
+            if shortTermLUFS.isFinite { shortTermLUFS = -Double.infinity }
+            if integratedLUFS.isFinite { integratedLUFS = -Double.infinity }
+            if truePeakDBTP.isFinite { truePeakDBTP = -Double.infinity }
             displaySmoothedValue = -Double.infinity
             let silentDisplay = compactMenuBar ? Self.padded("--") : Self.silentText
             if menuBarText != silentDisplay {
@@ -208,16 +235,19 @@ final class MeterState: ObservableObject {
             return
         }
         // One locked read: the audio thread writes these as it refreshes.
+        // Each @Published assignment tells every view to redraw, equal value or
+        // not, so only a change is assigned (1.1 sent 400 redraws per 10 s of
+        // silence).
         let reading = meter.reading
-        momentaryLUFS = reading.momentary
-        shortTermLUFS = reading.shortTerm
-        integratedLUFS = reading.integrated
-        truePeakDBTP = reading.truePeak
+        if momentaryLUFS != reading.momentary { momentaryLUFS = reading.momentary }
+        if shortTermLUFS != reading.shortTerm { shortTermLUFS = reading.shortTerm }
+        if integratedLUFS != reading.integrated { integratedLUFS = reading.integrated }
+        if truePeakDBTP != reading.truePeak { truePeakDBTP = reading.truePeak }
 
         if momentaryLUFS.isFinite {
             hasEverCapturedRealAudio = true
             neverCapturedPollCount = 0
-            possiblyMissingAudioAccess = false
+            if possiblyMissingAudioAccess { possiblyMissingAudioAccess = false }
             silentPollCount = 0
             hasAutoResetForCurrentSilence = false
         } else {

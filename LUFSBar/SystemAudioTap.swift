@@ -97,7 +97,11 @@ final class SystemAudioTap {
         isBuildingLoudnessMeter = true
         os_unfair_lock_unlock(loudnessMeterLock)
         guard !alreadyAsked else { return }
-        DispatchQueue.main.async { [weak self] in
+        // Through the main run loop in the common modes rather than the main
+        // dispatch queue: while the right-click menu is open the queue is not
+        // served, and the meter was only built once the menu closed. The CF call,
+        // because it is the one documented as safe from any thread.
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
             guard let self else { return }
             // The tap can be torn down while this is queued, and a meter put in
             // afterwards would show figures nothing is feeding. stopTap() has
@@ -127,6 +131,7 @@ final class SystemAudioTap {
             guard installed else { return }
             Self.log.notice("LoudnessMeter init sampleRate=\(sampleRate) channels=\(channels) of tapChannels=\(tapChannels) buffers=\(buffers) on the \(Thread.isMainThread ? "main" : "audio", privacy: .public) thread")
         }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     /// The level line, once a second, from the main thread. It used to be
@@ -138,7 +143,7 @@ final class SystemAudioTap {
         // the popover's four figures and the metric in the menu bar. The second
         // half is what a person sees, so the display tests read it from here.
         let state = MeterState.shared
-        let shown = "shown=\"\(state.menuBarText)\" popover=\(Self.figure(state.momentaryLUFS))/\(Self.figure(state.shortTermLUFS))/\(Self.figure(state.integratedLUFS))/\(Self.figure(state.truePeakDBTP)) metric=\(state.menuBarMetric)"
+        let shown = "shown=\"\(state.menuBarText)\" title=\"\(state.appliedMenuBarTitle)\" popover=\(Self.figure(state.momentaryLUFS))/\(Self.figure(state.shortTermLUFS))/\(Self.figure(state.integratedLUFS))/\(Self.figure(state.truePeakDBTP)) metric=\(state.menuBarMetric)"
         if let reading = loudnessMeter?.reading {
             Self.log.notice("M=\(Self.figure(reading.momentary), privacy: .public) S=\(Self.figure(reading.shortTerm), privacy: .public) I=\(Self.figure(reading.integrated), privacy: .public) TP=\(Self.figure(reading.truePeak), privacy: .public) \(shown, privacy: .public)")
         } else {
@@ -150,9 +155,34 @@ final class SystemAudioTap {
         value.isFinite ? String(format: "%.1f", value) : "--"
     }
 
-    /// LUFSBAR_STALL_AFTER_SECONDS = n: test only. n seconds after the tap
-    /// starts, the IOProc stops feeding the meter, which is what it looks like
-    /// from here when the bound device sleeps or is unplugged. Zero means never.
+    /// When the IOProc last ran, so the display can tell a reading that is current
+    /// from one that stopped being fed. Written on the audio thread and read on
+    /// the main one without a lock: an aligned 64 bit store is a single
+    /// instruction here, and a lock is the one thing that cannot go in an IOProc.
+    private var lastCallbackTicks: UInt64 = 0
+
+    /// False when nothing has arrived for two seconds, which covers every reason
+    /// the callbacks can stop: the bound device sleeping or being unplugged, the
+    /// HAL rebuilding, a format change nobody listened for. Without it the menu
+    /// bar went on showing the last number measured, which looks like an answer.
+    var isDelivering: Bool {
+        // The stamp is read once, before the clock, and the difference is floored
+        // at zero: read the other way round, a newer stamp landing between the two
+        // reads makes the unsigned subtraction go negative, which traps (measured
+        // in LUFSBar Pro, tests/isdelivering_race.swift there).
+        let last = lastCallbackTicks
+        guard last != 0 else { return false }
+        let now = mach_absolute_time()
+        let elapsed = Double(now > last ? now - last : 0) * Self.nanosecondsPerTick
+        return elapsed < 2_000_000_000
+    }
+
+    /// LUFSBAR_STALL_AFTER_SECONDS = n: test only. n seconds after the first
+    /// callback, the IOProc stops feeding the meter and stops stamping, which is
+    /// what it looks like from here when the bound device sleeps or is unplugged.
+    /// Counted from the first callback rather than the tap's start, because the
+    /// device can take seconds to start playing.
+    private var stallAfterTicks: UInt64 = 0
     private var stallAtTicks: UInt64 = 0
 
     private static let nanosecondsPerTick: Double = {
@@ -239,16 +269,21 @@ final class SystemAudioTap {
         // one. Used with LUFSBAR_METER_HOLD_MS.
         _ = Self.meterHoldMicroseconds
         stallAtTicks = 0
+        stallAfterTicks = 0
         if let seconds = TestSwitch.number("LUFSBAR_STALL_AFTER_SECONDS", limit: 86_400) {
-            stallAtTicks = mach_absolute_time() + UInt64(seconds * 1_000_000_000 / Self.nanosecondsPerTick)
-            Self.log.error("stalling on purpose \(seconds) s after the tap starts")
+            stallAfterTicks = UInt64(seconds * 1_000_000_000 / Self.nanosecondsPerTick)
+            Self.log.error("stalling on purpose \(seconds) s after the first callback")
         }
         meterDropTimer?.invalidate()
         meterDropTimer = nil
         levelLogTimer?.invalidate()
-        levelLogTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // In the common modes, like the polling in MeterState, so it goes on while
+        // a menu is open.
+        let levelLog = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.logMeterLevels()
         }
+        RunLoop.main.add(levelLog, forMode: .common)
+        levelLogTimer = levelLog
         if let ms = TestSwitch.number("LUFSBAR_DROP_METER_EVERY_MS", limit: 60_000) {
             Self.log.error("dropping the meter on purpose every \(ms) ms")
             meterDropTimer = Timer.scheduledTimer(withTimeInterval: ms / 1000, repeats: true) { [weak self] _ in
@@ -258,6 +293,8 @@ final class SystemAudioTap {
     }
 
     private func startTap() {
+        // Test only: a rebuilt tap waits its own n seconds before stalling.
+        stallAtTicks = 0
         // Bound to the default output's stream rather than tapping everything.
         //
         // A global tap averages every channel of the device into one stereo pair,
@@ -395,6 +432,8 @@ final class SystemAudioTap {
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
             self.ioProcID = nil
         }
+        // The IOProc has stopped, so nothing stamps this until the next tap runs.
+        lastCallbackTicks = 0
         if aggregateID != kAudioObjectUnknown {
             let status = AudioHardwareDestroyAggregateDevice(aggregateID)
             Self.log.notice("aggregate device destroyed id=\(self.aggregateID) (OSStatus \(status))")
@@ -534,7 +573,11 @@ final class SystemAudioTap {
         let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: bufferList))
         guard abl.count > 0 else { return }
         // Test only: behaves as though the callbacks had stopped coming.
-        if stallAtTicks != 0, mach_absolute_time() > stallAtTicks { return }
+        if stallAfterTicks != 0 {
+            if stallAtTicks == 0 { stallAtTicks = mach_absolute_time() + stallAfterTicks }
+            if mach_absolute_time() > stallAtTicks { return }
+        }
+        lastCallbackTicks = mach_absolute_time()
 
         let available = Self.availableChannels(in: abl)
         let (measured, left, right) = measuredChannels(available: available)

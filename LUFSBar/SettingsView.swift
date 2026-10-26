@@ -6,10 +6,23 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Toggle("Launch at Login", isOn: $launchAtLoginEnabled)
-                .onChange(of: launchAtLoginEnabled) { _, newValue in
-                    LaunchAtLogin.setEnabled(newValue)
+            // The toggle shows what the system has, not what was last clicked: after
+            // a change it is read back, so one that fails puts the toggle back
+            // (1.1 left it flipped), and it is read again whenever the window comes
+            // forward, since it can be changed in System Settings meanwhile.
+            Toggle("Launch at Login", isOn: Binding(
+                get: { launchAtLoginEnabled },
+                set: { wanted in
+                    LaunchAtLogin.setEnabled(wanted)
+                    launchAtLoginEnabled = LaunchAtLogin.isEnabled
                 }
+            ))
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+                // This window only: the view outlives its window closing, and the
+                // popover's window becomes key on every click.
+                guard (note.object as? NSWindow)?.title == Self.windowTitle else { return }
+                launchAtLoginEnabled = LaunchAtLogin.isEnabled
+            }
 
             // Bound directly to MeterState.shared.compactMenuBar, the same value
             // the right-click menu toggles, so both stay in sync automatically.
@@ -23,6 +36,8 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 340)
     }
+
+    static let windowTitle = "LUFSBar Settings"
 
     private static var versionString: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
