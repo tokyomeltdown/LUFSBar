@@ -222,14 +222,24 @@ final class SystemAudioTap {
         var right = 1
     }
     private var stereoPair = StereoPair()
-    // Rebuilds the tap when the bound device's stereo pair is changed in Audio
-    // MIDI Setup. Belongs to one device, so it is removed with the tap.
-    private var stereoPairListener: AudioObjectPropertyListenerBlock?
-    private var stereoPairListenerDevice = AudioObjectID(kAudioObjectUnknown)
+    /// The bound device's nominal sample rate when the tap was built. The device
+    /// can change rate and stay the same object, so no default output change
+    /// says so; before this was watched (and in 1.1), 96 kHz audio went on
+    /// feeding a meter built for 48 kHz and read M -18.7, TP -17.2 for a -18.0 tone.
+    private var boundSampleRate: Float64 = 0
+    // Rebuilds the tap when the bound device's stereo pair (Audio MIDI Setup) or
+    // its sample rate changes. Belongs to one device, so it is removed with the tap.
+    private var deviceListener: AudioObjectPropertyListenerBlock?
+    private var deviceListenerDevice = AudioObjectID(kAudioObjectUnknown)
 
     private static var stereoPairAddress = AudioObjectPropertyAddress(
         mSelector: kAudioDevicePropertyPreferredChannelsForStereo,
         mScope: kAudioObjectPropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    private static var sampleRateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
 
@@ -333,7 +343,8 @@ final class SystemAudioTap {
         // until stopTap() has stopped it.
         let pair = Self.stereoPair(of: device.id)
         stereoPair = pair
-        listenForStereoPairChanges(on: device.id)
+        boundSampleRate = Self.nominalSampleRate(of: device.id)
+        listenForDeviceChanges(on: device.id)
 
         let description = CATapDescription()
         // Mixdown off: with it on, a device-bound tap delivers the right peaks
@@ -422,10 +433,11 @@ final class SystemAudioTap {
     }
 
     private func stopTap() {
-        if let listener = stereoPairListener {
-            AudioObjectRemovePropertyListenerBlock(stereoPairListenerDevice, &Self.stereoPairAddress, DispatchQueue.main, listener)
-            stereoPairListener = nil
-            stereoPairListenerDevice = AudioObjectID(kAudioObjectUnknown)
+        if let listener = deviceListener {
+            AudioObjectRemovePropertyListenerBlock(deviceListenerDevice, &Self.stereoPairAddress, nil, listener)
+            AudioObjectRemovePropertyListenerBlock(deviceListenerDevice, &Self.sampleRateAddress, nil, listener)
+            deviceListener = nil
+            deviceListenerDevice = AudioObjectID(kAudioObjectUnknown)
         }
         if let ioProcID {
             AudioDeviceStop(aggregateID, ioProcID)
@@ -457,26 +469,42 @@ final class SystemAudioTap {
         loudnessMeter?.resetIntegrated()
     }
 
-    private func listenForStereoPairChanges(on device: AudioObjectID) {
+    private func listenForDeviceChanges(on device: AudioObjectID) {
+        // Delivered on Core Audio's own thread (no queue) and handed to the main
+        // run loop in the common modes, not the main dispatch queue: that queue
+        // is not served while the right-click menu is open, and a rate change
+        // made then went unnoticed until it closed, with the meter (which keeps
+        // running under the menu) reading 96 kHz audio as 48 kHz meanwhile.
+        // Not rebuilt from inside the callback either, since the rebuild
+        // removes this very listener.
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            // Rebuilt on the next turn of the main queue rather than here: the
-            // rebuild removes this very listener, which is not something to do
-            // from inside its own callback.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.stereoPairListenerDevice == device,
-                      Self.stereoPair(of: device) != self.stereoPair else { return }
-                Self.log.notice("stereo pair changed: rebuilding the tap")
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
+                guard let self, self.deviceListenerDevice == device else { return }
+                // Read back and compared, so a burst of notifications, or a rate
+                // that went somewhere and came back before this ran, does nothing.
+                let pairChanged = Self.stereoPair(of: device) != self.stereoPair
+                let rate = Self.nominalSampleRate(of: device)
+                let rateChanged = rate != self.boundSampleRate
+                guard pairChanged || rateChanged else { return }
+                if pairChanged { Self.log.notice("stereo pair changed: rebuilding the tap") }
+                if rateChanged { Self.log.notice("sample rate changed from \(self.boundSampleRate) to \(rate) Hz: rebuilding the tap") }
                 self.stopTap()
                 self.startTap()
             }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
         }
-        let status = AudioObjectAddPropertyListenerBlock(device, &Self.stereoPairAddress, DispatchQueue.main, listener)
-        guard status == noErr else {
-            Self.log.error("no listener on the stereo pair (OSStatus \(status)); changes to it will not be followed")
-            return
+        var listening = false
+        for var address in [Self.stereoPairAddress, Self.sampleRateAddress] {
+            let status = AudioObjectAddPropertyListenerBlock(device, &address, nil, listener)
+            if status == noErr {
+                listening = true
+            } else {
+                Self.log.error("no listener on the device's \(address.mSelector == kAudioDevicePropertyNominalSampleRate ? "sample rate" : "stereo pair", privacy: .public) (OSStatus \(status)); changes to it will not be followed")
+            }
         }
-        stereoPairListener = listener
-        stereoPairListenerDevice = device
+        guard listening else { return }
+        deviceListener = listener
+        deviceListenerDevice = device
     }
 
     /// The device's stereo pair (Audio MIDI Setup > Configure Speakers), as the
@@ -540,14 +568,14 @@ final class SystemAudioTap {
     }
 
     private func nominalSampleRate() -> Double {
+        Self.nominalSampleRate(of: aggregateID)
+    }
+
+    /// A device's nominal sample rate, or 48000 when it cannot be read.
+    private static func nominalSampleRate(of device: AudioObjectID) -> Float64 {
         var sampleRate: Float64 = 48000
         var size = UInt32(MemoryLayout<Float64>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectGetPropertyData(aggregateID, &address, 0, nil, &size, &sampleRate)
+        AudioObjectGetPropertyData(device, &sampleRateAddress, 0, nil, &size, &sampleRate)
         return sampleRate
     }
 
