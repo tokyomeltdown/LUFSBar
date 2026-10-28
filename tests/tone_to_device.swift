@@ -1,6 +1,7 @@
-// Test helper: plays a WAV file in a loop to one named output device,
-// regardless of the default output, for a bounded number of seconds.
-// Usage: tone_to_device "<device name>" <seconds> <file.wav>
+// Test helper: plays a WAV file in a loop to one output device, regardless of
+// the default output, for a bounded number of seconds. The device is named by
+// UID or by name, as default_output takes it, and only devices with outputs count.
+// Usage: tone_to_device "<name or UID>" <seconds> <file.wav>
 import AVFoundation
 import CoreAudio
 import Foundation
@@ -18,14 +19,24 @@ func devices() -> [AudioObjectID] {
     AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &s, &ids)
     return ids
 }
-func name(_ d: AudioObjectID) -> String? {
-    var a = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+func string(_ d: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+    var a = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     var v: Unmanaged<CFString>?
     var s = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
     guard AudioObjectGetPropertyData(d, &a, 0, nil, &s, &v) == noErr, let v else { return nil }
     return v.takeRetainedValue() as String
 }
-guard var dev = devices().first(where: { name($0) == args[1] }) else { print("no device named \(args[1])"); exit(1) }
+func hasOutputs(_ d: AudioObjectID) -> Bool {
+    var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+    var s: UInt32 = 0
+    return AudioObjectGetPropertyDataSize(d, &a, 0, nil, &s) == noErr && s > 0
+}
+let outputs = devices().filter(hasOutputs)
+// A UID is unique; a name may not be, so a UID match wins.
+guard var dev = outputs.first(where: { string($0, kAudioDevicePropertyDeviceUID) == args[1] })
+        ?? outputs.first(where: { string($0, kAudioObjectPropertyName) == args[1] }) else {
+    print("no output device named \(args[1])"); exit(1)
+}
 
 let file = try AVAudioFile(forReading: URL(fileURLWithPath: args[3]))
 let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!

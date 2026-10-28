@@ -185,6 +185,7 @@ final class MeterState: ObservableObject {
     }
 
     func reportAudioAccessError() {
+        if !audioAccessError { Self.log.error("showing the system audio access error") }
         audioAccessError = true
     }
 

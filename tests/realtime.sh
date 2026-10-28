@@ -10,6 +10,8 @@
 #      than every few dozen callbacks from the audio thread           (A-04, B5)
 #   4  LUFSBAR_FAIL_START_AT = tap | aggregate | ioproc | devicestart: each
 #      failure tears down the tap and aggregate it had made           (A-10b, B6)
+#   5  a start that fails twice (LUFSBAR_FAIL_START_TIMES=2) is tried again
+#      and gets going, without the "system audio access" panel           (B6)
 #
 # Usage: realtime.sh <LUFSBar.app> <tone.wav>
 # Plays the tone on the current default output. Quits the app when done.
@@ -84,5 +86,20 @@ for point in tap aggregate ioproc devicestart; do
         result FAIL "4 $point: missing ${(j:, :)missing}"
     fi
 done
+
+# 5. The first two attempts fail at the aggregate; the third must go through.
+LAUNCHED=$(mark)
+open --env LUFSBAR_FAIL_START_AT=aggregate --env LUFSBAR_FAIL_START_TIMES=2 "$APP"
+STARTED=no
+applog_wait "$LAUNCHED" 15 "capture started" && STARTED=yes
+LOGTEXT=$(applog_since "$LAUNCHED")
+quit_app
+FAILS=$(print -r -- $LOGTEXT | grep -c "failing on purpose at aggregate")
+PANEL=$(print -r -- $LOGTEXT | grep -c "showing the system audio access error")
+if [[ $STARTED == yes ]] && (( FAILS == 2 && PANEL == 0 )); then
+    result PASS "5 two failed starts were tried again and the third went through, with no access panel"
+else
+    result FAIL "5 failed starts: $FAILS, capture started: $STARTED, access panel shown: $PANEL (want 2, yes, 0)"
+fi
 
 exit $FAILED

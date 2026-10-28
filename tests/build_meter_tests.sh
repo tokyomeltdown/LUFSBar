@@ -16,7 +16,7 @@ METER=${2:-$R/LoudnessMeter.swift}
 mkdir -p $W
 clang -c -Os -I $R/libebur128 $R/libebur128/ebur128.c -o $W/ebur128.o 2>/dev/null || { print "libebur128 did not build"; exit 2; }
 printf '#include "ebur128.h"\n' > $W/bridge.h
-for t in meter_failed_init meter_refresh meter_growth; do
+for t in meter_failed_init meter_refresh meter_growth meter_mono; do
     [[ -n ${ONLY:-} && $t != $ONLY ]] && continue
     mkdir -p $W/$t && cp ${0:A:h}/$t.swift $W/$t/main.swift
     swiftc -O -import-objc-header $W/bridge.h -I $R/libebur128 $W/$t/main.swift $METER $W/ebur128.o -o $W/$t/run \
@@ -34,4 +34,6 @@ run() {
 [[ -z ${ONLY:-} || $ONLY == meter_refresh ]] && for c in "48000 512" "44100 512" "48000 2048" "48000 4096" "96000 128" "192000 256"; do run $W/meter_refresh/run ${=c}; done
 # B1: a call must not get slower the longer the meter runs.
 [[ -z ${ONLY:-} || $ONLY == meter_growth ]] && run $W/meter_growth/run 48000 512 30
+# A mono device reads as a stereo one does.
+[[ -z ${ONLY:-} || $ONLY == meter_mono ]] && for rate in 48000 44100; do run $W/meter_mono/run $rate; done
 exit $FAILED

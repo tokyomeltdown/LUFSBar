@@ -35,8 +35,16 @@ final class SystemAudioTap {
     /// Makes startTap() give up at a named point, so the teardown that runs
     /// when it does can actually be fired.
     /// LUFSBAR_FAIL_START_AT = tap | aggregate | ioproc | devicestart
+    /// LUFSBAR_FAIL_START_TIMES = n: only the first n attempts fail (default: all).
+    private static let failStartAt = ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_AT"]
+    private static var failStartsLeft: Int? =
+        TestSwitch.number("LUFSBAR_FAIL_START_TIMES", limit: 1000).map { Int($0) }
     private static func shouldFail(at point: String) -> Bool {
-        guard ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_AT"] == point else { return false }
+        guard failStartAt == point else { return false }
+        if let left = failStartsLeft {
+            guard left > 0 else { return false }
+            failStartsLeft = left - 1
+        }
         log.error("failing on purpose at \(point, privacy: .public)")
         return true
     }
@@ -142,9 +150,12 @@ final class SystemAudioTap {
         // What the meter holds, and what the app is showing: the menu bar text,
         // the popover's four figures and the metric in the menu bar. The second
         // half is what a person sees, so the display tests read it from here.
+        // The meter half is "--" when nothing is being delivered: a meter that is
+        // no longer fed keeps its last figures, and a test reading them would take
+        // a dead tap for a live one.
         let state = MeterState.shared
         let shown = "shown=\"\(state.menuBarText)\" title=\"\(state.appliedMenuBarTitle)\" popover=\(Self.figure(state.momentaryLUFS))/\(Self.figure(state.shortTermLUFS))/\(Self.figure(state.integratedLUFS))/\(Self.figure(state.truePeakDBTP)) metric=\(state.menuBarMetric)"
-        if let reading = loudnessMeter?.reading {
+        if isDelivering, let reading = loudnessMeter?.reading {
             Self.log.notice("M=\(Self.figure(reading.momentary), privacy: .public) S=\(Self.figure(reading.shortTerm), privacy: .public) I=\(Self.figure(reading.integrated), privacy: .public) TP=\(Self.figure(reading.truePeak), privacy: .public) \(shown, privacy: .public)")
         } else {
             Self.log.notice("M=-- S=-- I=-- TP=-- \(shown, privacy: .public)")
@@ -182,7 +193,9 @@ final class SystemAudioTap {
     /// what it looks like from here when the bound device sleeps or is unplugged.
     /// Counted from the first callback rather than the tap's start, because the
     /// device can take seconds to start playing.
+    /// LUFSBAR_STALL_FOR_SECONDS = m: and resumes after m seconds (default: never).
     private var stallAfterTicks: UInt64 = 0
+    private var stallForTicks: UInt64 = 0
     private var stallAtTicks: UInt64 = 0
 
     private static let nanosecondsPerTick: Double = {
@@ -272,18 +285,20 @@ final class SystemAudioTap {
                 AudioObjectID(kAudioObjectSystemObject), &Self.defaultOutputDeviceAddress, DispatchQueue.main, listener
             )
         }
-        startTap()
-
-        // LUFSBAR_DROP_METER_EVERY_MS = n: test only. Lets go of the meter every
-        // n ms the way a device change does, so the next callback needs a new
-        // one. Used with LUFSBAR_METER_HOLD_MS.
+        // Test switches, read here on the main thread before the IOProc exists,
+        // so the audio thread never sets up a static or reads the environment.
         _ = Self.meterHoldMicroseconds
-        stallAtTicks = 0
         stallAfterTicks = 0
+        stallForTicks = 0
         if let seconds = TestSwitch.number("LUFSBAR_STALL_AFTER_SECONDS", limit: 86_400) {
             stallAfterTicks = UInt64(seconds * 1_000_000_000 / Self.nanosecondsPerTick)
+            if let resume = TestSwitch.number("LUFSBAR_STALL_FOR_SECONDS", limit: 86_400) {
+                stallForTicks = UInt64(resume * 1_000_000_000 / Self.nanosecondsPerTick)
+            }
             Self.log.error("stalling on purpose \(seconds) s after the first callback")
         }
+        startTap()
+
         meterDropTimer?.invalidate()
         meterDropTimer = nil
         levelLogTimer?.invalidate()
@@ -294,6 +309,9 @@ final class SystemAudioTap {
         }
         RunLoop.main.add(levelLog, forMode: .common)
         levelLogTimer = levelLog
+        // LUFSBAR_DROP_METER_EVERY_MS = n: test only. Lets go of the meter every
+        // n ms the way a device change does, so the next callback needs a new
+        // one. Used with LUFSBAR_METER_HOLD_MS.
         if let ms = TestSwitch.number("LUFSBAR_DROP_METER_EVERY_MS", limit: 60_000) {
             Self.log.error("dropping the meter on purpose every \(ms) ms")
             meterDropTimer = Timer.scheduledTimer(withTimeInterval: ms / 1000, repeats: true) { [weak self] _ in
@@ -602,8 +620,9 @@ final class SystemAudioTap {
         guard abl.count > 0 else { return }
         // Test only: behaves as though the callbacks had stopped coming.
         if stallAfterTicks != 0 {
-            if stallAtTicks == 0 { stallAtTicks = mach_absolute_time() + stallAfterTicks }
-            if mach_absolute_time() > stallAtTicks { return }
+            let now = mach_absolute_time()
+            if stallAtTicks == 0 { stallAtTicks = now + stallAfterTicks }
+            if now > stallAtTicks && (stallForTicks == 0 || now < stallAtTicks + stallForTicks) { return }
         }
         lastCallbackTicks = mach_absolute_time()
 

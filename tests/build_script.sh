@@ -7,6 +7,8 @@
 #      certificate for (standing in for anyone else's Mac), build.sh builds
 #      the app, signed ad hoc                                          (B11)
 #   2  on an unchanged copy, build.sh signs with the team's certificate
+#   3  build.sh does not build into a fixed name in the shared /tmp, where
+#      another account could have put a folder or a link first        (S1)
 #
 # Usage: build_script.sh
 # Two Debug builds into a work folder; leaves nothing in the repository.
@@ -51,6 +53,13 @@ if (( STATUS == 0 )) && [[ $SIG == $TEAM ]]; then
     result PASS "2 with the team's certificate, build.sh signed with it"
 else
     result FAIL "2 with the team's certificate: build.sh exit $STATUS, app signature: $SIG (see $WORK/own.log)"
+fi
+
+FIXED=$(grep -n '"/tmp/\|:-/tmp/' $REPO/build.sh)
+if [[ -n $FIXED ]]; then
+    result FAIL "3 build.sh builds into a fixed path in the shared /tmp: $FIXED"
+else
+    result PASS "3 build.sh builds into a folder private to the account"
 fi
 
 exit $FAILED

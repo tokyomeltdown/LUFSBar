@@ -13,6 +13,14 @@
 #   6  the work folders are not fixed paths in the shared /tmp       (S1)
 #   7  the version comes from the Xcode project alone: with only        (M4)
 #      MARKETING_VERSION changed, both scripts build and package that version
+#   8  make_pkg.sh stopped for want of a signing identity removes the
+#      version-less LUFSBar.pkg (the one that gets uploaded) and keeps the
+#      archived package of this version
+#   9  a package whose notarization fails is not left behind
+#
+# A refused run (3, 3a, 4, 8) must remove LUFSBar.pkg and leave the archived
+# LUFSBar_<version>.pkg alone; only a run that is about to build a new one may
+# replace it.
 #
 # Before the fix the scripts ignore LUFSBAR_RELEASE_DIR and use /tmp/LUFSBar_*,
 # so after running this against them, remove what it left there.
@@ -42,9 +50,18 @@ cat > $STUBS/xcrun <<EOF
 # goes to the real one.
 [[ \$1 == notarytool || \$1 == stapler ]] || exec /usr/bin/xcrun "\$@"
 print "xcrun \$*" >> $CALLS
-# "stapler validate" answers what STAPLE_VALID says (0 = stapled).
+# "stapler validate" answers what STAPLE_VALID says (0 = stapled), and
+# "notarytool" fails when NOTARY_FAIL is set.
 [[ \$1 == stapler && \$2 == validate ]] && exit \${STAPLE_VALID:-0}
+[[ \$1 == notarytool && -n \${NOTARY_FAIL:-} ]] && exit 1
 exit 0
+EOF
+cat > $STUBS/pkgutil <<EOF
+#!/bin/zsh
+# The packages here are unsigned, so --check-signature is answered yes; the
+# rest (--expand) is the real pkgutil.
+[[ \$1 == --check-signature ]] && { print "pkgutil \$*" >> $CALLS; exit 0; }
+exec /usr/sbin/pkgutil "\$@"
 EOF
 cat > $STUBS/pkgbuild <<EOF
 #!/bin/zsh
@@ -60,17 +77,18 @@ chmod +x $STUBS/*
 # the default place is left alone.
 export PATH=$STUBS:$PATH SIGNER="Test (TEST)" LUFSBAR_RELEASE_DIR=$WORK/release
 
-# The version the project builds, which is what the scripts must package.
+# The version the project builds, which is what the scripts must package, read
+# the way the scripts read it.
 project_version() {
-    sed -n 's/^[[:space:]]*MARKETING_VERSION = \(.*\);$/\1/p' $1/LUFSBar.xcodeproj/project.pbxproj | sort -u
+    bash -c 'source "$1/release_settings.sh" >/dev/null && printf %s "$VERSION"' _ $1
 }
 VERSION=$(project_version $COPY)
 PKG=$COPY/dist/LUFSBar_$VERSION.pkg
 result() { print "$1  $2"; [[ $1 == FAIL ]] && FAILED=1; }
-# Packages from an earlier run, which a refused run must not leave behind: the
-# version-less one is what gets uploaded.
+# Packages from an earlier run. A refused run must remove the version-less one
+# (it is what gets uploaded) and keep the archived one of this version.
 stale_packages() { mkdir -p $COPY/dist; print old > $PKG; print old > $COPY/dist/LUFSBar.pkg; }
-no_packages() { [[ ! -e $PKG && ! -e $COPY/dist/LUFSBar.pkg ]]; }
+refused_cleanly() { [[ ! -e $COPY/dist/LUFSBar.pkg && $(cat $PKG 2>/dev/null) == old ]]; }
 
 # 1. A good run.
 : > $CALLS
@@ -96,6 +114,27 @@ else
     result FAIL "5 make_pkg.sh made no package: see $WORK/make_pkg-good.log"
 fi
 
+# 9. The same good app, but Apple turns the package down.
+stale_packages
+NOTARY_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-rejected.log 2>&1
+STATUS=$?
+if (( STATUS != 0 )) && [[ ! -e $PKG && ! -e $COPY/dist/LUFSBar.pkg ]]; then
+    result PASS "9 a package that failed notarization was not left behind"
+else
+    result FAIL "9 make_pkg.sh (exit $STATUS) left a package after notarization failed: $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')"
+fi
+
+# 8. No signing identity at all: no SIGNER, and no signer file under HOME.
+stale_packages
+mkdir -p $WORK/nohome
+env -u SIGNER HOME=$WORK/nohome bash $COPY/make_pkg.sh > $WORK/make_pkg-nosigner.log 2>&1
+STATUS=$?
+if (( STATUS != 0 )) && refused_cleanly; then
+    result PASS "8 without a signing identity make_pkg.sh stopped, removed LUFSBar.pkg and kept the archive"
+else
+    result FAIL "8 without a signing identity: make_pkg.sh exit $STATUS, got the packages wrong (LUFSBar.pkg left, or the archive removed)"
+fi
+
 # 6. No work folder at a fixed name in the shared /tmp.
 FIXED=$(grep -n '"/tmp/' $COPY/notarize.sh $COPY/make_pkg.sh)
 if [[ -n $FIXED ]]; then
@@ -108,10 +147,10 @@ fi
 stale_packages
 STAPLE_VALID=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-unstapled.log 2>&1
 STATUS=$?
-if (( STATUS != 0 )) && no_packages; then
+if (( STATUS != 0 )) && refused_cleanly; then
     result PASS "4 make_pkg.sh refused an app that is not stapled"
 else
-    result FAIL "4 make_pkg.sh (exit $STATUS) wrapped an app that is not stapled, or left an old package"
+    result FAIL "4 make_pkg.sh (exit $STATUS) wrapped an app that is not stapled, or got the packages wrong (LUFSBar.pkg left, or the archive removed)"
 fi
 
 # 2 and 3. Mark the app from the good run as an older version, break the
@@ -120,10 +159,10 @@ fi
 stale_packages
 bash $COPY/make_pkg.sh > $WORK/make_pkg-version.log 2>&1
 STATUS=$?
-if (( STATUS != 0 )) && no_packages; then
+if (( STATUS != 0 )) && refused_cleanly; then
     result PASS "3a make_pkg.sh refused an app of another version"
 else
-    result FAIL "3a make_pkg.sh (exit $STATUS) wrapped version 1.0 as $VERSION, or left an old package"
+    result FAIL "3a make_pkg.sh (exit $STATUS) wrapped version 1.0 as $VERSION, or got the packages wrong (LUFSBar.pkg left, or the archive removed)"
 fi
 print "this does not compile" >> $COPY/LUFSBar/LUFSBarApp.swift
 : > $CALLS
@@ -137,10 +176,10 @@ fi
 stale_packages
 bash $COPY/make_pkg.sh > $WORK/make_pkg-stale.log 2>&1
 STATUS=$?
-if (( STATUS != 0 )) && no_packages; then
+if (( STATUS != 0 )) && refused_cleanly; then
     result PASS "3 make_pkg.sh refused what the failed run left behind"
 else
-    result FAIL "3 make_pkg.sh (exit $STATUS) wrapped the app from an earlier run, or left an old package"
+    result FAIL "3 make_pkg.sh (exit $STATUS) wrapped the app from an earlier run, or got the packages wrong (LUFSBar.pkg left, or the archive removed)"
 fi
 
 # 7. A second copy with nothing changed but MARKETING_VERSION.

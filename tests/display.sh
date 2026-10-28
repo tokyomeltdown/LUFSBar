@@ -9,6 +9,9 @@
 #   3  the meter keeps going while the right-click menu is open       (B10)
 #   4  in steady silence, the views are not told to redraw            (M2)
 #   5  a Launch at Login change that fails puts the toggle back       (B8)
+#   6  callbacks stop for 4 s mid-programme and resume: the meter
+#      starts over rather than carrying the old programme on
+
 #
 # The menu bar item may be hidden (behind the notch, or turned off in System
 # Settings > Menu Bar), so the menu and Settings are opened by test switches
@@ -129,15 +132,41 @@ fi
 launch --env LUFSBAR_OPEN_SETTINGS_AFTER_SECONDS=2 --env LUFSBAR_FAIL_LAUNCH_AT_LOGIN=1
 sleep 3
 P=$(pgrep -x LUFSBar)
-BEFORE_VALUE=$($BIN/axui value $P "Launch at Login")
-$BIN/axui press $P "Launch at Login" >/dev/null
+# Every accessibility call is checked: when one fails, axui prints its error on
+# stdout, and two equal error messages would otherwise read as an unchanged toggle.
+AX_OK=yes
+BEFORE_VALUE=$($BIN/axui value $P "Launch at Login") || AX_OK=no
+$BIN/axui press $P "Launch at Login" >/dev/null || AX_OK=no
 sleep 2
-AFTER_VALUE=$($BIN/axui value $P "Launch at Login")
+AFTER_VALUE=$($BIN/axui value $P "Launch at Login") || AX_OK=no
 quit_app
-if [[ -n $BEFORE_VALUE && $AFTER_VALUE == $BEFORE_VALUE ]]; then
+if [[ $AX_OK == no || $BEFORE_VALUE != [01] ]]; then
+    result FAIL "5 could not read or press the Launch at Login toggle (${BEFORE_VALUE:-nothing}): is Settings open, and does this have the Accessibility permission?"
+elif [[ $AFTER_VALUE == $BEFORE_VALUE ]]; then
     result PASS "5 the failed change left the toggle at $AFTER_VALUE, as the system has it"
 else
     result FAIL "5 the toggle went from ${BEFORE_VALUE:-?} to ${AFTER_VALUE:-?} although the change failed"
+fi
+
+# 6. The tap stops being fed 4 s after its first callback and resumes 4 s
+# later, with the tone playing throughout. Short-term holds 3 s, so a meter
+# that started over reads well below -18 on the first lines after the resume;
+# one that carried on reads -18.0 at once.
+SINCE=$(mark)
+launch --env LUFSBAR_STALL_AFTER_SECONDS=4 --env LUFSBAR_STALL_FOR_SECONDS=4
+{ afplay "$TONE"; afplay "$TONE"; afplay "$TONE" } & afplay_pid=$!
+applog_wait "$SINCE" 15 "LoudnessMeter init"
+sleep 9
+RESUMED=$(level_lines "$SINCE" | awk '/ M=--/ { stalled = 1; next } stalled && / M=-?[0-9]/ { print; exit }')
+wait $afplay_pid
+quit_app
+S6=$(print -r -- $RESUMED | grep -o " S=-*[0-9.]*" | cut -c4-)
+if [[ -z $RESUMED ]]; then
+    result FAIL "6 no reading after the stall (did it stall and resume?)"
+elif (( S6 <= -19 )); then
+    result PASS "6 after a 4 s stall the meter started over: first short-term $S6"
+else
+    result FAIL "6 after a 4 s stall the meter carried on: first short-term $S6 (want -19 or lower)"
 fi
 
 exit $FAILED

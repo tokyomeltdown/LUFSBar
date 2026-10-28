@@ -90,11 +90,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //                                            which closes itself 8 s later
         //   LUFSBAR_MENU_CHOOSE = <item title>       and picks that item as it closes
         //   LUFSBAR_OPEN_SETTINGS_AFTER_SECONDS = n  opens the Settings window
+        // Opened from a run-loop timer, as a click's event is delivered, and not
+        // from a main-queue block: a menu tracked inside a main-queue block keeps
+        // the main queue from being served until it closes, which a real
+        // right-click does not (measured), and the tests would then be checking a
+        // condition no user meets.
         if let seconds = TestSwitch.number("LUFSBAR_OPEN_MENU_AFTER_SECONDS", limit: 3600) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            let choice = ProcessInfo.processInfo.environment["LUFSBAR_MENU_CHOOSE"]
+            let open = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
                 guard let button = self?.statusItem?.button else { return }
-                self?.showMetricMenu(from: button)
+                self?.showMetricMenu(from: button, closingAfter: 8, choosing: choice)
             }
+            RunLoop.main.add(open, forMode: .common)
         }
         if let seconds = TestSwitch.number("LUFSBAR_OPEN_SETTINGS_AFTER_SECONDS", limit: 3600) {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in self?.showSettings() }
@@ -126,7 +133,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showMetricMenu(from button: NSStatusBarButton) {
+    /// `closingAfter` and `choosing` are for the test switch only: the menu closes
+    /// itself after that many seconds, picking the item with that title first.
+    private func showMetricMenu(from button: NSStatusBarButton, closingAfter seconds: TimeInterval? = nil, choosing choice: String? = nil) {
         let options: [(MenuBarMetric, String)] = [
             (.momentary, "Momentary"),
             (.shortTerm, "Short-term"),
@@ -150,10 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(compactItem)
 
         Self.log.notice("right-click menu opened")
-        if TestSwitch.number("LUFSBAR_OPEN_MENU_AFTER_SECONDS", limit: 3600) != nil {
+        if let seconds {
             // In the common modes, so it fires while the menu is tracking.
-            let choice = ProcessInfo.processInfo.environment["LUFSBAR_MENU_CHOOSE"]
-            let close = Timer(timeInterval: 8, repeats: false) { _ in
+            let close = Timer(timeInterval: seconds, repeats: false) { _ in
                 if let choice, let index = menu.items.firstIndex(where: { $0.title == choice }) {
                     menu.performActionForItem(at: index)
                 }
