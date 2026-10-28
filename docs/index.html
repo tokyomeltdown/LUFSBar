@@ -97,7 +97,7 @@ body.ja span.lang-en,body.ja a.lang-en{display:none;}
     <div class="right">
       <button class="langbtn" id="btn-en" onclick="setLang('en')">EN</button>
       <button class="langbtn" id="btn-ja" onclick="setLang('ja')">JA</button>
-      <a class="pill" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download</span><span class="lang-ja">ダウンロード</span></a>
+      <a class="pill dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download</span><span class="lang-ja">ダウンロード</span></a>
     </div>
   </div>
 </nav>
@@ -115,7 +115,7 @@ body.ja span.lang-en,body.ja a.lang-en{display:none;}
     <p class="sub">メニューバーに常駐する無料のLUFSメーター。Apple Music、Spotify、YouTube、DAWの出力をリアルタイム計測。BlackHoleも仮想オーディオデバイスも不要。</p>
   </div>
   <div class="cta">
-    <a class="pill big" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download for Mac</span><span class="lang-ja">Macにダウンロード</span></a>
+    <a class="pill big dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download for Mac</span><span class="lang-ja">Macにダウンロード</span></a>
     <a class="pill big ghost" href="https://github.com/tokyomeltdown/LUFSBar" target="_blank" rel="noopener">GitHub</a>
   </div>
   <p class="meta">macOS 14.4+ · Apple silicon &amp; Intel · Signed &amp; notarized · Free &amp; open source (MIT)</p>
@@ -208,7 +208,7 @@ body.ja span.lang-en,body.ja a.lang-en{display:none;}
   <div class="lang-en"><h2>Put a meter where<br>you'll actually see it.</h2></div>
   <div class="lang-ja"><h2>いつも見える場所に、<br>メーターを。</h2></div>
   <div class="cta" style="margin-top:34px;">
-    <a class="pill big" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download for Mac — Free</span><span class="lang-ja">無料でダウンロード</span></a>
+    <a class="pill big dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download for Mac — Free</span><span class="lang-ja">無料でダウンロード</span></a>
     <a class="pill big ghost" href="https://tokyomeltdown.github.io/lufsbar-pro/">LUFSBar Pro</a>
   </div>
   <p class="meta">LUFSBar.pkg · Signed &amp; notarized</p>
@@ -242,6 +242,19 @@ function setLang(l){
   setLang(saved || ((navigator.language||'').indexOf('ja')===0 ? 'ja' : 'en'));
   var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target);}});},{threshold:.15});
   document.querySelectorAll('.reveal').forEach(function(el){io.observe(el);});
+
+  // The browser's own confirmation before the package downloads. The version and size are written here by hand:
+  // change them with each release (Finder's size, in decimal units).
+  var DL={version:'1.1',size:'303 KB'};
+  document.querySelectorAll('a.dl').forEach(function(a){
+    a.addEventListener('click',function(e){
+      var ja=document.body.classList.contains('ja');
+      var msg=ja
+        ?'LUFSBar.pkg（LUFSBar '+DL.version+'・約 '+DL.size+'）をダウンロードしますか？'
+        :'Download LUFSBar.pkg (LUFSBar '+DL.version+', about '+DL.size+')?';
+      if(!window.confirm(msg)) e.preventDefault();
+    });
+  });
 })();
 </script>
 </body>
