@@ -9,8 +9,8 @@
 #      and a meter rebuilt at that rate
 #   3  and back to the starting rate                              -> the same
 #   4  switched to <other rate> while the right-click menu is open -> M -18.0
-#      while the menu is still open (the main dispatch queue is not served
-#      under a menu, so a rebuild queued there waited for it to close)
+#      while the menu is still open (the rebuild is acted on while a menu is
+#      tracking)
 #
 # The switch itself is a real transient: the player restarts its output at
 # the new rate, and true peak holds what it played (-16.9 dBTP measured with a

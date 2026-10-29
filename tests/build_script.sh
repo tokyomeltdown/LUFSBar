@@ -55,7 +55,9 @@ else
     result FAIL "2 with the team's certificate: build.sh exit $STATUS, app signature: $SIG (see $WORK/own.log)"
 fi
 
-FIXED=$(grep -n '"/tmp/\|:-/tmp/' $REPO/build.sh)
+# Any line that is not a comment naming /tmp (release_scripts.sh 6 asks the same
+# of the release scripts).
+FIXED=$(grep -n '/tmp' $REPO/build.sh | grep -v '^[0-9]*:[[:space:]]*#')
 if [[ -n $FIXED ]]; then
     result FAIL "3 build.sh builds into a fixed path in the shared /tmp: $FIXED"
 else

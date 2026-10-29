@@ -66,9 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = pop
 
         // Straight through, not .receive(on: DispatchQueue.main): menuBarText is
-        // only ever set on the main thread already, and the main queue is not
-        // served while the right-click menu is open, so the menu bar stood still
-        // for as long as the menu was showing.
+        // only ever set on the main thread, so there is nothing to hop to, and the
+        // title follows the poll with no extra turn of the queue.
         cancellable = MeterState.shared.$menuBarText
             .sink { [weak self] text in
                 guard let button = self?.statusItem?.button else { return }

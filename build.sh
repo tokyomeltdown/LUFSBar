@@ -3,13 +3,14 @@
 #  LUFSBar build.sh
 #  Building under ~/Documents (which is synced by iCloud Drive) attaches File
 #  Provider attributes to the build output, and codesign then fails with a
-#  resource fork / Finder info error. Putting DerivedData in /tmp avoids it.
-#  LUFSBAR_BUILD_DIR overrides where it goes.
+#  resource fork / Finder info error. DerivedData goes in the per-user temporary
+#  folder instead (outside the synced folder, and private to this account, not
+#  a fixed name in the shared /tmp). LUFSBAR_BUILD_DIR overrides where it goes.
 # ============================================================
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-DERIVED_DATA="${LUFSBAR_BUILD_DIR:-/tmp/LUFSBar-build}"
+DERIVED_DATA="${LUFSBAR_BUILD_DIR:-$(getconf DARWIN_USER_TEMP_DIR)LUFSBar-build}"
 APP_NAME="LUFSBar"
 LOG="$DERIVED_DATA/build.log"
 

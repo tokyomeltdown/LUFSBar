@@ -25,11 +25,12 @@ quit_app() {
     killall LUFSBar 2>/dev/null
     for _ in {1..10}; do pgrep -x LUFSBar >/dev/null || return 0; sleep 1; done
 }
-trap quit_app EXIT
 
 if pgrep -x LUFSBar >/dev/null || pgrep -x "LUFSBar Pro" >/dev/null; then
     print "quit LUFSBar and LUFSBar Pro first"; exit 2
 fi
+# Only now: on the way out it quits LUFSBar, which above is someone's own copy.
+trap quit_app EXIT
 
 # 1-3. Meters dropped while the audio thread holds them, with the tone playing.
 LAUNCHED=$(mark)

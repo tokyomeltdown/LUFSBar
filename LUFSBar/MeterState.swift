@@ -46,8 +46,10 @@ final class MeterState: ObservableObject {
     // Reference snapshot: shows the difference against the I/S/TP saved with one click.
     @Published private(set) var referenceSnapshot: ReferenceSnapshot?
 
-    // Set when SystemAudioTap.start() fails creating the tap or the aggregate device,
-    // or in AudioDeviceStart. Typically the system audio permission is denied.
+    // Set when building the tap (at launch, or on a rebuild after the default output,
+    // stereo pair, rate or streams changed) still fails after its retries, at the
+    // tap, the aggregate device, the IOProc or AudioDeviceStart; cleared by the
+    // next build that succeeds.
     @Published private(set) var audioAccessError = false
 
     // When postinstall auto-launches the app via launchctl asuser, that first session
@@ -109,6 +111,15 @@ final class MeterState: ObservableObject {
     // stops the menu bar width wobbling as the digit count changes.
     private static let displayFloor: Double = -70
 
+    // Audio, for the hint and the silence reset, is what BS.1770 counts as programme: a
+    // Momentary at or above the absolute gate. Below it is silence, digital zero or not.
+    // Until 1.1 only -inf was silence, so a stream that carries next to nothing (a
+    // browser tab can keep one open; it reads about -870 LUFS) kept the hint away for
+    // good and the reset from ever happening, and the next track was added to the last.
+    private static func isAudible(_ momentary: Double) -> Bool {
+        momentary >= displayFloor
+    }
+
     // A normal space (U+0020) can be collapsed by the layout, which makes the menu bar
     // width wobble whenever the digit count changes. Padding to a fixed five characters
     // with a non-breaking space (U+00A0) avoids that.
@@ -127,11 +138,13 @@ final class MeterState: ObservableObject {
     // the anti-flicker pass is applied only when the text is generated.
     private var displaySmoothedValue: Double = -Double.infinity
 
-    // If silence (momentary at -inf, i.e. true digital silence) lasts a while, playback is
+    // If silence (below the absolute gate, see isAudible) lasts a while, playback is
     // assumed to have stopped and Integrated is reset automatically. The decision uses
     // continuous silence so a brief gap between tracks does not trigger it. It resets once
     // per episode, and the flag clears when audio returns.
     private var silentPollCount = 0
+    // Whether the last poll found audio being delivered, to catch it stopping.
+    private var wasDelivering = false
     private var hasAutoResetForCurrentSilence = false
     private let silenceResetThresholdPolls = 20  // 0.1s x 20 = about 2 seconds
 
@@ -190,6 +203,7 @@ final class MeterState: ObservableObject {
     }
 
     func clearAudioAccessError() {
+        if audioAccessError { Self.log.notice("the system audio access error is cleared") }
         audioAccessError = false
     }
 
@@ -222,7 +236,17 @@ final class MeterState: ObservableObject {
         // A meter that is no longer being fed keeps its last figures, and those look
         // exactly like a live reading. Treated the same as having no meter at all,
         // in the popover as well as the menu bar.
-        guard let meter = SystemAudioTap.shared.loudnessMeter, SystemAudioTap.shared.isDelivering else {
+        let delivering = SystemAudioTap.shared.isDelivering
+        defer { wasDelivering = delivering }
+        guard let meter = SystemAudioTap.shared.loudnessMeter, delivering else {
+            // And when the callbacks stop under a meter that stays (the device
+            // slept, the HAL hiccuped), the measurement starts over, as it does
+            // after silence: otherwise the old programme's Integrated and held
+            // true peak came back as live the moment the callbacks resumed.
+            if wasDelivering, !delivering, SystemAudioTap.shared.loudnessMeter != nil {
+                Self.log.notice("the callbacks stopped; starting the measurement over")
+                SystemAudioTap.shared.resetIntegrated()
+            }
             noteNoAudioYet()
             if momentaryLUFS.isFinite { momentaryLUFS = -Double.infinity }
             if shortTermLUFS.isFinite { shortTermLUFS = -Double.infinity }
@@ -245,7 +269,7 @@ final class MeterState: ObservableObject {
         if integratedLUFS != reading.integrated { integratedLUFS = reading.integrated }
         if truePeakDBTP != reading.truePeak { truePeakDBTP = reading.truePeak }
 
-        if momentaryLUFS.isFinite {
+        if Self.isAudible(momentaryLUFS) {
             hasEverCapturedRealAudio = true
             neverCapturedPollCount = 0
             if possiblyMissingAudioAccess { possiblyMissingAudioAccess = false }
@@ -255,6 +279,7 @@ final class MeterState: ObservableObject {
             noteNoAudioYet()
             silentPollCount += 1
             if silentPollCount >= silenceResetThresholdPolls && !hasAutoResetForCurrentSilence {
+                Self.log.notice("silent for 2 s: starting the measurement over")
                 SystemAudioTap.shared.resetIntegrated()
                 hasAutoResetForCurrentSilence = true
             }

@@ -17,10 +17,11 @@
 #      version-less LUFSBar.pkg (the one that gets uploaded) and keeps the
 #      archived package of this version
 #   9  a package whose notarization fails is not left behind
+#  10  a package that was notarized but could not be stapled is kept in the
+#      work folder, not put in dist/ and not thrown away
 #
-# A refused run (3, 3a, 4, 8) must remove LUFSBar.pkg and leave the archived
-# LUFSBar_<version>.pkg alone; only a run that is about to build a new one may
-# replace it.
+# A run that stops (3, 3a, 4, 8, 9, 10) must remove LUFSBar.pkg and leave the
+# archived LUFSBar_<version>.pkg alone; only a run that completes replaces it.
 #
 # Before the fix the scripts ignore LUFSBAR_RELEASE_DIR and use /tmp/LUFSBar_*,
 # so after running this against them, remove what it left there.
@@ -50,9 +51,10 @@ cat > $STUBS/xcrun <<EOF
 # goes to the real one.
 [[ \$1 == notarytool || \$1 == stapler ]] || exec /usr/bin/xcrun "\$@"
 print "xcrun \$*" >> $CALLS
-# "stapler validate" answers what STAPLE_VALID says (0 = stapled), and
-# "notarytool" fails when NOTARY_FAIL is set.
+# "stapler validate" answers what STAPLE_VALID says (0 = stapled), "stapler
+# staple" fails when STAPLE_FAIL is set, and "notarytool" when NOTARY_FAIL is.
 [[ \$1 == stapler && \$2 == validate ]] && exit \${STAPLE_VALID:-0}
+[[ \$1 == stapler && \$2 == staple && -n \${STAPLE_FAIL:-} ]] && exit 1
 [[ \$1 == notarytool && -n \${NOTARY_FAIL:-} ]] && exit 1
 exit 0
 EOF
@@ -85,8 +87,8 @@ project_version() {
 VERSION=$(project_version $COPY)
 PKG=$COPY/dist/LUFSBar_$VERSION.pkg
 result() { print "$1  $2"; [[ $1 == FAIL ]] && FAILED=1; }
-# Packages from an earlier run. A refused run must remove the version-less one
-# (it is what gets uploaded) and keep the archived one of this version.
+# Packages from an earlier run. A run that stops must remove the version-less
+# one (it is what gets uploaded) and keep the archived one of this version.
 stale_packages() { mkdir -p $COPY/dist; print old > $PKG; print old > $COPY/dist/LUFSBar.pkg; }
 refused_cleanly() { [[ ! -e $COPY/dist/LUFSBar.pkg && $(cat $PKG 2>/dev/null) == old ]]; }
 
@@ -116,12 +118,28 @@ fi
 
 # 9. The same good app, but Apple turns the package down.
 stale_packages
+: > $CALLS
 NOTARY_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-rejected.log 2>&1
 STATUS=$?
-if (( STATUS != 0 )) && [[ ! -e $PKG && ! -e $COPY/dist/LUFSBar.pkg ]]; then
-    result PASS "9 a package that failed notarization was not left behind"
+if ! grep -q "^xcrun notarytool submit" $CALLS; then
+    result FAIL "9 make_pkg.sh (exit $STATUS) stopped before notarization: see $WORK/make_pkg-rejected.log"
+elif (( STATUS != 0 )) && refused_cleanly; then
+    result PASS "9 a package that failed notarization was not left in dist/, and the archive was kept"
 else
-    result FAIL "9 make_pkg.sh (exit $STATUS) left a package after notarization failed: $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')"
+    result FAIL "9 make_pkg.sh (exit $STATUS) after notarization failed: dist/ holds $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')(want the old archive only)"
+fi
+
+# 10. Notarized, but the staple fails: the package Apple accepted is kept where
+# it can be stapled by hand, and dist/ is left as a stopped run leaves it.
+stale_packages
+: > $CALLS
+STAPLE_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-nostaple.log 2>&1
+STATUS=$?
+KEPT=$LUFSBAR_RELEASE_DIR/LUFSBar-release/pkg/LUFSBar_$VERSION.pkg
+if (( STATUS != 0 )) && [[ -f $KEPT ]] && refused_cleanly && grep -q "stapler staple" $WORK/make_pkg-nostaple.log; then
+    result PASS "10 a notarized package that could not be stapled was kept in the work folder"
+else
+    result FAIL "10 make_pkg.sh (exit $STATUS) after the staple failed: kept: $([[ -f $KEPT ]] && print yes || print no), dist/ holds $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')"
 fi
 
 # 8. No signing identity at all: no SIGNER, and no signer file under HOME.
@@ -135,8 +153,10 @@ else
     result FAIL "8 without a signing identity: make_pkg.sh exit $STATUS, got the packages wrong (LUFSBar.pkg left, or the archive removed)"
 fi
 
-# 6. No work folder at a fixed name in the shared /tmp.
-FIXED=$(grep -n '"/tmp/' $COPY/notarize.sh $COPY/make_pkg.sh)
+# 6. No work folder at a fixed name in the shared /tmp: no line that is not a
+# comment names /tmp, in any of the scripts (build_script.sh 3 asks the same of
+# build.sh).
+FIXED=$(grep -Hn '/tmp' $COPY/notarize.sh $COPY/make_pkg.sh $COPY/release_settings.sh | grep -v '^[^:]*:[0-9]*:[[:space:]]*#')
 if [[ -n $FIXED ]]; then
     result FAIL "6 fixed paths in the shared /tmp: $(print -r -- $FIXED | tr '\n' ' ')"
 else

@@ -7,8 +7,18 @@
 # ============================================================
 set -e
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# The version-less package goes first, before anything below can stop this run:
+# it is what gets uploaded to Releases, so a run that stops for any reason must
+# not leave the last one there looking like this version. It is PKG_LATEST
+# below, spelled out here because release_settings.sh, which names it, can
+# itself stop the run. The archived package of each version
+# (LUFSBar_<version>.pkg) is only replaced by a run that completes.
+rm -f "$HERE/dist/LUFSBar.pkg"
+
 # Name, version, work folder and signing identity: see release_settings.sh.
-source "$(cd "$(dirname "$0")" && pwd)/release_settings.sh"
+source "$HERE/release_settings.sh"
 load_signer
 SIGN_INST="Developer ID Installer: $SIGNER"
 
@@ -16,6 +26,10 @@ APP_TMP="$RELEASE_DIR/notarize/$APP_NAME.app"
 WORK="$RELEASE_DIR/pkg"
 DIST_DIR="$ROOT/dist"
 PKG_SIGNED="$DIST_DIR/${APP_NAME}_${VERSION}.pkg"
+# Built, notarized and stapled in the work folder, and moved into dist/ only
+# once every step has gone through, so nothing unfinished ever sits there under
+# a finished package's name, whatever stops the run.
+PKG_BUILD="$WORK/${APP_NAME}_${VERSION}.pkg"
 # A copy without the version number. Uploading it to GitHub Releases under this
 # name makes releases/latest/download/LUFSBar.pkg always point at the newest build.
 PKG_LATEST="$DIST_DIR/${APP_NAME}.pkg"
@@ -23,11 +37,6 @@ PKG_LATEST="$DIST_DIR/${APP_NAME}.pkg"
 echo "=========================================="
 echo "  LUFSBar  make_pkg.sh  (v${VERSION})"
 echo "=========================================="
-
-# Last run's packages go first. The version-less one is what gets uploaded to
-# Releases, so a run that stops at a check below must not leave an older one
-# there looking like this version.
-rm -f "$PKG_SIGNED" "$PKG_LATEST"
 
 if [ ! -d "$APP_TMP" ]; then
     echo "ERROR: signed and notarized app not found: $APP_TMP"
@@ -100,36 +109,46 @@ pkgbuild \
     --identifier "$BUNDLE_ID" \
     --version "$VERSION" \
     --sign "$SIGN_INST" \
-    "$PKG_SIGNED"
+    "$PKG_BUILD"
 
 # The pin from step 0.5 has to have reached the package, checked before it
 # goes to Apple: an empty <relocate/> means nothing may be relocated.
-pkgutil --expand "$PKG_SIGNED" "$WORK/expanded"
+pkgutil --expand "$PKG_BUILD" "$WORK/expanded"
 if ! grep -q "<relocate/>" "$WORK/expanded/PackageInfo"; then
     echo "ERROR: the package still lets Installer relocate the app."
-    rm -f "$PKG_SIGNED"
     exit 1
 fi
 
 # ---- Step 2: notarize the pkg ----
 echo "[2/5] notarize pkg (submit & wait) ..."
-xcrun notarytool submit "$PKG_SIGNED" \
+xcrun notarytool submit "$PKG_BUILD" \
     --keychain-profile "$NOTARY_PROFILE" --wait
 
 # ---- Step 3: staple ----
+#   Apple has accepted the package by now, so a failure here (the ticket not
+#   yet reachable, the network gone) leaves it where it is, to be stapled by
+#   hand, rather than costing another signing and notarization.
 echo "[3/5] staple ..."
-xcrun stapler staple "$PKG_SIGNED"
-xcrun stapler validate "$PKG_SIGNED"
+if ! xcrun stapler staple "$PKG_BUILD" || ! xcrun stapler validate "$PKG_BUILD"; then
+    echo "ERROR: the package was notarized but could not be stapled."
+    echo "It is still in the work folder (running this script again would build and"
+    echo "notarize a new one). Wait a little, then finish it by hand:"
+    echo "  xcrun stapler staple \"$PKG_BUILD\""
+    echo "  mv \"$PKG_BUILD\" \"$PKG_SIGNED\""
+    echo "  cp \"$PKG_SIGNED\" \"$PKG_LATEST\""
+    exit 1
+fi
 
 # ---- Step 4: verify ----
 echo "[4/5] verify ..."
-spctl -a -vvv -t install "$PKG_SIGNED" || true
-pkgutil --check-signature "$PKG_SIGNED"
+spctl -a -vvv -t install "$PKG_BUILD" || true
+pkgutil --check-signature "$PKG_BUILD"
 
-# ---- Step 5: version-less copy for the GitHub Releases upload ----
-#   This is a plain copy of an already signed and stapled file, so the signature
-#   and the notarization ticket stay valid.
-echo "[5/5] copy version-less release asset ..."
+# ---- Step 5: into dist/, with a version-less copy for the GitHub Releases upload ----
+#   A plain copy of an already signed and stapled file, so the signature and the
+#   notarization ticket stay valid.
+echo "[5/5] move into dist/ and copy the version-less release asset ..."
+mv -f "$PKG_BUILD" "$PKG_SIGNED"
 cp "$PKG_SIGNED" "$PKG_LATEST"
 pkgutil --check-signature "$PKG_LATEST"
 

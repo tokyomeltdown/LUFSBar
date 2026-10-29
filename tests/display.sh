@@ -11,21 +11,23 @@
 #   5  a Launch at Login change that fails puts the toggle back       (B8)
 #   6  callbacks stop for 4 s mid-programme and resume: the meter
 #      starts over rather than carrying the old programme on
-
+#   7  2 s of near silence (-100 dBFS, below the -70 LUFS absolute gate)
+#      between two programmes starts the measurement over, as digital
+#      silence does
 #
 # The menu bar item may be hidden (behind the notch, or turned off in System
 # Settings > Menu Bar), so the menu and Settings are opened by test switches
 # rather than by clicking it.
 #
 # Usage: display.sh <LUFSBar.app> <tone.wav>
-# Needs axui (built from this folder) in $BIN, and the Accessibility
+# Needs axui and make_tone (built from this folder) in $BIN, and the Accessibility
 # permission for whatever runs it. Plays the tone on the default output.
 # Restores the menu bar metric setting and quits the app when done.
 
 set -u
 source ${0:A:h}/applog.sh
 APP=$1; TONE=$2
-BIN=${BIN:?set BIN to the folder holding axui}
+BIN=${BIN:?set BIN to the folder holding axui and make_tone}
 DOMAIN=com.tokyomeltdown.lufsbar
 SAVED_METRIC=$(defaults read $DOMAIN menuBarMetric 2>/dev/null)
 FAILED=0
@@ -39,7 +41,6 @@ finish() {
     if [[ -n $SAVED_METRIC ]]; then defaults write $DOMAIN menuBarMetric -string $SAVED_METRIC
     else defaults delete $DOMAIN menuBarMetric 2>/dev/null; fi
 }
-trap finish EXIT
 launch() {
     local since=$(mark)
     open "$@" "$APP"
@@ -50,6 +51,8 @@ level_lines() { applog_since "$1" | grep " M=" }
 if pgrep -x LUFSBar >/dev/null || pgrep -x "LUFSBar Pro" >/dev/null; then
     print "quit LUFSBar and LUFSBar Pro first"; exit 2
 fi
+# Only now: on the way out it quits LUFSBar, which above is someone's own copy.
+trap finish EXIT
 defaults delete $DOMAIN menuBarMetric 2>/dev/null
 
 # 1. The tap stops being fed 6 s after its first callback, with the tone still
@@ -157,7 +160,10 @@ launch --env LUFSBAR_STALL_AFTER_SECONDS=4 --env LUFSBAR_STALL_FOR_SECONDS=4
 { afplay "$TONE"; afplay "$TONE"; afplay "$TONE" } & afplay_pid=$!
 applog_wait "$SINCE" 15 "LoudnessMeter init"
 sleep 9
-RESUMED=$(level_lines "$SINCE" | awk '/ M=--/ { stalled = 1; next } stalled && / M=-?[0-9]/ { print; exit }')
+# The stall is a run of "--" lines after a live one: the lines before the tone
+# reaches the meter read "--" too, and taking those for the stall would judge
+# the programme's very first reading, which is low on any build.
+RESUMED=$(level_lines "$SINCE" | awk '/ M=-?[0-9]/ && !live { live = 1; next } live && / M=--/ { stalled = 1; next } stalled && / M=-?[0-9]/ { print; exit }')
 wait $afplay_pid
 quit_app
 S6=$(print -r -- $RESUMED | grep -o " S=-*[0-9.]*" | cut -c4-)
@@ -167,6 +173,28 @@ elif (( S6 <= -19 )); then
     result PASS "6 after a 4 s stall the meter started over: first short-term $S6"
 else
     result FAIL "6 after a 4 s stall the meter carried on: first short-term $S6 (want -19 or lower)"
+fi
+
+# 7. -18 dBFS for 5 s, then -100 dBFS for 4 s, then -30 dBFS. If the near
+# silence started the measurement over, true peak and Integrated read the last
+# part alone (about -30); if not, true peak still holds -18 and Integrated
+# blends the two.
+TONES=$(mktemp -d)
+"$BIN/make_tone" -100 4 48000 $TONES/quiet.wav && "$BIN/make_tone" -30 6 48000 $TONES/low.wav \
+    || { print "could not make the tones for 7"; exit 2; }
+SINCE=$(mark)
+launch
+afplay "$TONE"; afplay $TONES/quiet.wav; afplay $TONES/low.wav
+LAST=$(level_lines "$SINCE" | tail -1)
+quit_app
+rm -rf $TONES
+RESET=$(applog_since "$SINCE" | grep -c "silent for 2 s")
+TP7=$(print -r -- $LAST | grep -o " TP=-*[0-9.]*" | cut -c5-)
+I7=$(print -r -- $LAST | grep -o " I=-*[0-9.]*" | cut -c4-)
+if [[ -n $TP7 && -n $I7 ]] && (( TP7 <= -29 && I7 <= -29 )); then
+    result PASS "7 the near silence started the measurement over: TP $TP7, I $I7 ($RESET silence resets logged)"
+else
+    result FAIL "7 the near silence did not start the measurement over: TP ${TP7:-none}, I ${I7:-none} (want -29 or lower)"
 fi
 
 exit $FAILED

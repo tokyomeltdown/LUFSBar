@@ -54,7 +54,7 @@ final class LoudnessMeter {
     /// rounded up to whole buffers: 9.4 reads a second at 48 kHz / 512 and 5.9
     /// at 4096, so the panel kept reading the same figures twice. The count
     /// starts half a period past due, so the first buffer, and the first after
-    /// Reset, reads at once instead of showing "--" for 100 ms; the half also
+    /// a reset, reads at once instead of showing "--" for 100 ms; the half also
     /// keeps the reads off the buffers where the library closes a 100 ms block.
     private let framesPerRefresh: Int
     private var framesSinceRefresh: Int
@@ -77,8 +77,8 @@ final class LoudnessMeter {
     // which still shows as -18.0, but a value right at a rounding edge can
     // move the displayed tenth. Momentary and Short-term do not use it.
     //
-    // One constant for init and resetIntegrated, so a Reset cannot rebuild the
-    // state without it.
+    // One constant, used by makeState, so a reset cannot rebuild the state
+    // without it.
     private static let mode = Int32(
         EBUR128_MODE_M.rawValue | EBUR128_MODE_S.rawValue
             | EBUR128_MODE_I.rawValue | EBUR128_MODE_TRUE_PEAK.rawValue
@@ -89,7 +89,7 @@ final class LoudnessMeter {
         self.channels = channels
         framesPerRefresh = max(1, Int(sampleRate) / 10)
         framesSinceRefresh = framesPerRefresh + framesPerRefresh / 2
-        guard let st = ebur128_init(channels, UInt(sampleRate), Self.mode) else {
+        guard let st = Self.makeState(sampleRate: sampleRate, channels: channels) else {
             return nil
         }
         state = st
@@ -99,6 +99,29 @@ final class LoudnessMeter {
     }
 
     private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "meter")
+
+    /// A nominal rate from the HAL as a rate to build a meter at, or nil when
+    /// libebur128 would refuse it (it takes 16 Hz to 2,822,400 Hz). Checked
+    /// before the conversion, which traps on a value out of range.
+    static func sampleRate(fromNominal nominal: Double) -> UInt32? {
+        guard nominal.isFinite, nominal >= 16, nominal <= 2_822_400 else { return nil }
+        return UInt32(nominal.rounded())
+    }
+
+    /// Every state, the first and each one a reset builds, comes from here, so
+    /// none is made with a different mode or channel map.
+    ///
+    /// A one-channel meter measures a mono output device. macOS folds a stereo
+    /// programme into that channel at the same amplitude, and libebur128 counts
+    /// a single channel once, so it read 3 dB below the same programme on any
+    /// stereo device; marked dual mono, it counts it as both ears hearing it.
+    private static func makeState(sampleRate: UInt32, channels: UInt32) -> UnsafeMutablePointer<ebur128_state>? {
+        guard let state = ebur128_init(channels, UInt(sampleRate), mode) else { return nil }
+        if channels == 1 {
+            _ = ebur128_set_channel(state, 0, Int32(EBUR128_DUAL_MONO.rawValue))
+        }
+        return state
+    }
 
     deinit {
         // ebur128_destroy is a run of free(), which has no place on the audio
@@ -137,18 +160,19 @@ final class LoudnessMeter {
     ///
     /// Building the replacement and freeing the old one both happen outside the
     /// lock, because each is a run of malloc and free and the IO thread waits on
-    /// this same lock to add its frames. Reset is a button someone presses while
-    /// listening, so the wait would be heard. Only the swap is held.
+    /// this same lock to add its frames. A reset comes while audio may be
+    /// playing (a stall can end any moment), so the wait would be heard. Only
+    /// the swap is held.
     ///
     /// Safe to do in two steps because this is only ever called from the main
-    /// thread: the button, and the silence timer in MeterState.
+    /// thread: MeterState's poll, after silence or when the callbacks stop.
     func resetIntegrated() {
         os_unfair_lock_lock(unfairLock)
         let sampleRate = state.map { UInt32($0.pointee.samplerate) }
         os_unfair_lock_unlock(unfairLock)
         guard let sampleRate else { return }
 
-        guard let fresh = ebur128_init(channels, UInt(sampleRate), Self.mode) else { return }
+        guard let fresh = Self.makeState(sampleRate: sampleRate, channels: channels) else { return }
 
         os_unfair_lock_lock(unfairLock)
         var retired = state
