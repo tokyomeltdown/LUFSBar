@@ -47,5 +47,5 @@ run() {
 [[ -z ${ONLY:-} || $ONLY == meter_mono ]] && for rate in 48000 44100; do run $W/meter_mono/run $rate; done
 # What MeterState decides from what it reads: the menu bar after near silence,
 # and which quiet counts as silence for the reset.
-[[ -z ${ONLY:-} || $ONLY == meter_state ]] && for c in lag reset110 pause85; do run $W/meter_state/run $c; done
+[[ -z ${ONLY:-} || $ONLY == meter_state ]] && for c in lag reset110 pause85 floor; do run $W/meter_state/run $c; done
 exit $FAILED

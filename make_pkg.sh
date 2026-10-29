@@ -106,6 +106,13 @@ pkgbuild --analyze --root "$WORK/root" "$COMPONENT_PLIST"
 
 # ---- Step 1: pkgbuild (installs into /Applications) + Developer ID Installer signature ----
 echo "[1/5] pkgbuild + sign ..."
+# A package kept from an earlier run that could not be stapled is superseded by
+# the one built now (the message it came with said so), and left there its
+# name, which carries only the version, could get it finished as this build.
+if [ -e "$PKG_UNSTAPLED" ]; then
+    echo "Removing $PKG_UNSTAPLED, left by an earlier run: this run builds a new one."
+    rm -f "$PKG_UNSTAPLED"
+fi
 pkgbuild \
     --root "$WORK/root" \
     --component-plist "$COMPONENT_PLIST" \
@@ -141,9 +148,9 @@ if ! xcrun stapler staple "$PKG_BUILD" || ! xcrun stapler validate "$PKG_BUILD";
     echo "ERROR: the package was notarized but could not be stapled."
     echo "It is kept as $PKG_UNSTAPLED"
     echo "(running this script again would build and notarize a new one)."
-    echo "Wait a little, then finish it with this one line, which stops at the"
-    echo "first step that fails:"
-    echo "  xcrun stapler staple \"$PKG_UNSTAPLED\" && xcrun stapler validate \"$PKG_UNSTAPLED\" && mv \"$PKG_UNSTAPLED\" \"$PKG_SIGNED\" && cp \"$PKG_SIGNED\" \"$PKG_LATEST\""
+    echo "Wait a little, then finish it with this one line, which does what steps"
+    echo "3 to 5 do and stops at the first step that fails:"
+    echo "  xcrun stapler staple \"$PKG_UNSTAPLED\" && xcrun stapler validate \"$PKG_UNSTAPLED\" && cp \"$PKG_UNSTAPLED\" \"$PKG_LATEST.partial\" && pkgutil --check-signature \"$PKG_LATEST.partial\" && mv -f \"$PKG_UNSTAPLED\" \"$PKG_SIGNED\" && mv -f \"$PKG_LATEST.partial\" \"$PKG_LATEST\""
     exit 1
 fi
 
@@ -154,14 +161,14 @@ pkgutil --check-signature "$PKG_BUILD"
 
 # ---- Step 5: into dist/, with a version-less copy for the GitHub Releases upload ----
 #   A plain copy of an already signed and stapled file, so the signature and the
-#   notarization ticket stay valid. Copied under another name and renamed once
-#   checked, so a copy that stops part way (a full disk) is not left as the
-#   upload asset.
+#   notarization ticket stay valid. Copied under another name and checked
+#   first, and only then is anything in dist/ replaced, so a copy that stops part
+#   way (a full disk) is neither left as the upload asset nor has already
+#   replaced the archive.
 echo "[5/5] move into dist/ and copy the version-less release asset ..."
-mv -f "$PKG_BUILD" "$PKG_SIGNED"
-rm -f "$PKG_UNSTAPLED"
-cp "$PKG_SIGNED" "$PKG_LATEST.partial"
+cp "$PKG_BUILD" "$PKG_LATEST.partial"
 pkgutil --check-signature "$PKG_LATEST.partial"
+mv -f "$PKG_BUILD" "$PKG_SIGNED"
 mv -f "$PKG_LATEST.partial" "$PKG_LATEST"
 
 echo ""

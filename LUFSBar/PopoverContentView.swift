@@ -120,10 +120,10 @@ struct PopoverContentView: View {
 
     private var audioAccessErrorView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("System audio access is required")
+            Text("Not capturing system audio")
                 .font(.callout)
                 .fontWeight(.semibold)
-            Text("LUFSBar couldn't start capturing system audio. Please allow access in System Settings, then relaunch LUFSBar.")
+            Text("LUFSBar couldn't start capturing system audio and keeps trying in the background. If this stays, check System Audio Recording access for LUFSBar in System Settings.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

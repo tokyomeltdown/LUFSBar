@@ -11,6 +11,8 @@
 //             (below -100 LUFS) starts the measurement over
 //   pause85   -18 dBFS 5 s, -85 dBFS 4 s, -18 dBFS 3 s: a quiet passage
 //             (below the -70 LUFS gate, above -100) does not
+//   floor     -85 dBFS for 4 s: below the -70 LUFS gate the menu bar and the
+//             popover's figures show "--", not a "-70.0" that reads like a level
 //
 // Args: the case. Build with MeterState.swift, LoudnessMeter.swift and the stub
 // (see build_meter_tests.sh).
@@ -24,6 +26,7 @@ switch scenario {
 case "lag": phases = [(-700, 3), (-18, 3)]
 case "reset110": phases = [(-18, 5), (-110, 3), (-30, 3)]
 case "pause85": phases = [(-18, 5), (-85, 4), (-18, 3)]
+case "floor": phases = [(-85, 4)]
 default: print("unknown case \(scenario)"); exit(2)
 }
 
@@ -78,6 +81,8 @@ switch scenario {
 case "lag":
     run(until: phases[0].seconds + 1.0)
     lagCheck = (shownFigure(), state.momentaryLUFS)
+case "floor":
+    run(until: total)
 case "reset110", "pause85":
     run(until: phases[0].seconds)
     resetsAtTone = SystemAudioTap.shared.resets
@@ -100,6 +105,11 @@ case "pause85":
     let resets = SystemAudioTap.shared.resets - resetsAtTone
     ok = resets == 0
     print("pause85: \(resets) resets across the -85 dBFS passage \(ok ? "PASS" : "FAIL (want none)")")
+case "floor":
+    let popover = MeterState.displayString(state.shortTermLUFS)
+    ok = shownFigure() == nil && popover == "--" && state.shortTermLUFS.isFinite
+    print(String(format: "floor: Short-term %.1f, menu bar \"%@\", popover \"%@\" %@", state.shortTermLUFS,
+                 state.menuBarText, popover, ok ? "PASS" : "FAIL (want -- in both)"))
 default: ok = false
 }
 exit(ok ? 0 : 1)

@@ -212,7 +212,11 @@ afplay "$TONE"; afplay $TONES/quiet85.wav; afplay "$TONE"
 LOGTEXT=$(applog_since "$SINCE")
 quit_app
 RESET=$(print -r -- $LOGTEXT | grep -c "silent for 2 s")
-if (( RESET == 0 )); then
+# It has to have been measuring: with no meter fed, no reset is logged either.
+MEASURED=$(print -r -- $LOGTEXT | grep -c " M=-1[78]\.[0-9] ")
+if (( MEASURED == 0 )); then
+    result FAIL "8 the tone was never measured (no level line near -18), so nothing was shown"
+elif (( RESET == 0 )); then
     result PASS "8 a quiet passage at -85 dBFS did not start the measurement over"
 else
     result FAIL "8 a quiet passage at -85 dBFS started the measurement over ($RESET times)"

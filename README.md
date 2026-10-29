@@ -12,7 +12,7 @@ LUFSBar is a free, open-source loudness meter that lives in your macOS menu bar.
 - **Full readout in one click** — M / S / I LUFS and True Peak (dBTP)
 - **Reference snapshot** — capture the loudness of whatever is playing (e.g. a reference track on a streaming service), then see the delta against your own mix in real time
 - **Streaming normalization forecast** — see exactly how much Apple Music (-16), Spotify (-14), and YouTube (-14) will turn your track down
-- **Auto-reset** — Integrated measurement resets automatically after ~2 seconds of silence
+- **Auto-reset** — Integrated measurement resets automatically after ~2 seconds of silence (below -100 LUFS)
 
 ## What gets measured
 

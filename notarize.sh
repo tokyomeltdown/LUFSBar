@@ -103,9 +103,19 @@ if ! notarize_and_wait "$ZIP_NOTARIZE"; then
 fi
 
 # ---- Step 5: staple the ticket to the .app and validate ----
+#   Apple has accepted the app by now, so a failure here (the ticket not yet
+#   reachable, the network gone) is finished by hand rather than costing a new
+#   build and notarization: the app stays where make_pkg.sh looks for it until
+#   this script runs again.
 echo "[5/6] staple ..."
-xcrun stapler staple "$APP_TMP"
-xcrun stapler validate "$APP_TMP"
+if ! xcrun stapler staple "$APP_TMP" || ! xcrun stapler validate "$APP_TMP"; then
+    echo "ERROR: the app was notarized but could not be stapled."
+    echo "It is kept as $APP_TMP"
+    echo "(running this script again would build and notarize a new one)."
+    echo "Wait a little, then staple it with this one line and run bash make_pkg.sh:"
+    echo "  xcrun stapler staple \"$APP_TMP\" && xcrun stapler validate \"$APP_TMP\""
+    exit 1
+fi
 spctl -a -vvv "$APP_TMP" || true
 
 echo "[6/6] done."

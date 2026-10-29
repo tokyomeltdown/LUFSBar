@@ -4,11 +4,31 @@ import os
 
 /// The LUFSBAR_* test switches, read in one place: a positive, finite value no
 /// larger than `limit`, or nil, so a typo cannot reach a conversion that traps.
+/// Read on the main thread only: reading the environment allocates and takes
+/// locks, and a switch held in a static is first read wherever it is first
+/// used, which must not be the audio thread. A read anywhere else is logged,
+/// so a test can tell.
 enum TestSwitch {
+    private static let log = Logger(subsystem: "com.tokyomeltdown.lufsbar", category: "switch")
+
     static func number(_ name: String, limit: Double) -> Double? {
+        if !Thread.isMainThread {
+            log.error("test switch \(name, privacy: .public) was read off the main thread")
+        }
         guard let raw = ProcessInfo.processInfo.environment[name],
               let value = Double(raw), value.isFinite, value > 0 else { return nil }
         return min(value, limit)
+    }
+
+    /// A list such as "1,2,3,5": positive whole numbers, or nil when the switch
+    /// is not set or any item is not one (so a typo fails nothing, rather than
+    /// everything, and the "on purpose" lines the tests look for are missing).
+    static func numbers(_ name: String) -> Set<Int>? {
+        guard let raw = ProcessInfo.processInfo.environment[name] else { return nil }
+        let items = raw.split(separator: ",", omittingEmptySubsequences: false)
+            .map { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !items.isEmpty, items.allSatisfy({ ($0 ?? 0) > 0 }) else { return nil }
+        return Set(items.compactMap { $0 })
     }
 }
 
@@ -42,11 +62,11 @@ final class SystemAudioTap {
     private static let failStartAt = ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_AT"]
     private static var failStartsLeft: Int? =
         TestSwitch.number("LUFSBAR_FAIL_START_TIMES", limit: 1000).map { Int($0) }
-    private static let failStartAttempts: Set<Int>? =
-        ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_ATTEMPTS"].map {
-            Set($0.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) })
-        }
+    private static let failStartAttempts = TestSwitch.numbers("LUFSBAR_FAIL_START_ATTEMPTS")
     private static var failStartCalls = 0
+    /// LUFSBAR_NO_OUTPUT_AT_ATTEMPT = n: the n-th build reads no default output.
+    private static let noOutputAttempt = TestSwitch.number("LUFSBAR_NO_OUTPUT_AT_ATTEMPT", limit: 1000).map { Int($0) }
+    private static var startTapCalls = 0
     /// LUFSBAR_METER_RATE = Hz: the meter request reads this as the rate, for
     /// the first LUFSBAR_METER_RATE_TIMES requests (default: all), the way a
     /// device that is reconfiguring or going away can answer.
@@ -140,9 +160,7 @@ final class SystemAudioTap {
         let askedFor = generation
         os_unfair_lock_unlock(loudnessMeterLock)
         guard !alreadyAsked else { return }
-        // Through the main run loop in the common modes, so it is served while a
-        // menu is tracking too. The CF call, because it is the one documented as
-        // safe from any thread.
+        // Built and installed on the main thread (see below for how it gets there).
         let build: () -> Void = { [weak self] in
             guard let self else { return }
             // The tap can be torn down, and another built, while this is queued.
@@ -173,8 +191,9 @@ final class SystemAudioTap {
                 return
             }
             os_unfair_lock_lock(self.loudnessMeterLock)
-            // Only into an empty place, unless asked to replace: a request left
-            // over from before a rebuild can land after the new tap has one.
+            // Only into an empty place, unless asked to replace. Requests from an
+            // earlier tap were dropped above, and one tap has one request out at
+            // a time, so this is a guard rather than a case that comes up.
             let installed = replacing || self._loudnessMeter == nil
             var retired: LoudnessMeter?
             if installed {
@@ -194,25 +213,30 @@ final class SystemAudioTap {
             DispatchQueue.main.asyncAfter(deadline: .now() + ms / 1000, execute: build)
             return
         }
+        // Through the main run loop in the common modes, so it is served while a
+        // menu is tracking too. The CF call, because it is the one documented as
+        // safe from any thread.
         CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue, build)
         CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
-    /// Meters that could not be built in a row on this tap. Counted apart from
-    /// failed builds: the tap is running, so this is no matter of access, and
-    /// no panel is shown for it.
+    /// Meters that could not be built in a row on this tap, for the log. Counted
+    /// apart from failed builds: the tap is running, so this is no matter of
+    /// access, and no panel is shown for it.
     private var meterFailures = 0
     private var meterRetry: Timer?
 
-    /// Lets the next callback ask for a meter again, after a wait from the same
-    /// schedule as the builds. Until then the flag stays up and nothing asks.
+    /// Lets the next callback ask for a meter again a second later. Until then
+    /// the flag stays up and nothing asks. Every second, not on the build
+    /// schedule: asking costs one HAL read and nothing else on the Mac, and on
+    /// that schedule a device that had recovered went on showing "--", with the
+    /// audio playing, for as long as the 30 or 60 s step it had reached.
     /// Main thread only.
     private func meterFailed() {
         meterFailures += 1
-        let delay = Self.retryDelays[min(meterFailures, Self.retryDelays.count) - 1]
-        Self.log.notice("asking for a meter again in \(delay) s (\(self.meterFailures) failed in a row)")
+        Self.log.notice("asking for a meter again in 1 s (meter failure \(self.meterFailures))")
         meterRetry?.invalidate()
-        let retry = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+        let retry = Timer(timeInterval: 1, repeats: false) { [weak self] _ in
             guard let self else { return }
             os_unfair_lock_lock(self.loudnessMeterLock)
             self.isBuildingLoudnessMeter = false
@@ -298,10 +322,12 @@ final class SystemAudioTap {
         let uid: String
     }
 
-    /// The default output as read from the HAL: none at all, a device, or a
-    /// device that did not give its UID (which happens for a moment while it
-    /// reconfigures). The last is a failed build to try again, not a reason to
-    /// wait: nothing would tell the app to look again.
+    /// The default output as read from the HAL: none at all, a device, or
+    /// unreadable: a device that did not give its UID (which happens for a moment
+    /// while it reconfigures), or, with kAudioObjectUnknown, a read of which
+    /// device is the default that failed outright. Unreadable is a failed build
+    /// to try again, not a reason to wait: nothing would tell the app to look
+    /// again.
     private enum DefaultOutput: Equatable {
         case none
         case device(OutputDevice)
@@ -403,7 +429,9 @@ final class SystemAudioTap {
         }
         // Test switches, read here on the main thread before the IOProc exists,
         // so the audio thread never sets up a static or reads the environment.
+        // These two are the ones the IOProc uses (tests/realtime.sh 6).
         _ = Self.meterHoldMicroseconds
+        _ = Self.meterRequestDelay
         stallAfterTicks = 0
         stallForTicks = 0
         if let seconds = TestSwitch.number("LUFSBAR_STALL_AFTER_SECONDS", limit: 86_400) {
@@ -465,7 +493,17 @@ final class SystemAudioTap {
         startRetry?.invalidate()
         startRetry = nil
         stopTap()
-        if startTap() == .failed { noteFailure() }
+        switch startTap() {
+        case .failed:
+            noteFailure()
+        case .started, .waiting:
+            // Nothing is failing any more: a tap is running, or there is no
+            // output to build one on (and a new one wakes the listener). The
+            // count starts again, and a panel blaming the build goes. (On
+            // .waiting both used to stay, and the next episode inherited them.)
+            failures = 0
+            MeterState.shared.clearAudioAccessError()
+        }
     }
 
     /// Counts a failed build, shows the panel once there have been enough, and
@@ -503,7 +541,12 @@ final class SystemAudioTap {
         // speakers. Bound, the tap carries that one device at its own channel
         // count, at the source's level, with nothing to correct.
         // The trade-off: audio sent to any other device is not measured at all.
+        Self.startTapCalls += 1
         var output = Self.defaultOutput(failingTheRead: Self.shouldFail(at: "defaultdevice"))
+        if Self.noOutputAttempt == Self.startTapCalls {
+            Self.log.error("reading no default output on purpose")
+            output = .none
+        }
         if case .device(let device) = output, Self.shouldFail(at: "uid") {
             output = .unreadable(device.id)
         }
@@ -615,9 +658,7 @@ final class SystemAudioTap {
             return .failed
         }
         started = true
-        failures = 0
         Self.log.notice("capture started")
-        MeterState.shared.clearAudioAccessError()
         return .started
     }
 

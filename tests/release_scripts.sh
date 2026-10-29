@@ -21,8 +21,14 @@
 #      has to say Accepted
 #  10  a package that was notarized but could not be stapled is kept in dist/
 #      as LUFSBar_<version>-unstapled.pkg, with one chained line to finish it
-#  11  a copy of the upload asset that stops part way is not left as it
+#      that goes through a .partial copy, as step 5 does
+#  10b a later run that builds a new package removes a kept one of the same
+#      version, which it supersedes
+#  11  a copy of the upload asset that stops part way is not left as it, and
+#      has not already replaced the archive
 #  12  notarize.sh, too, stops when the report does not say Accepted
+#  13  an app that was notarized but could not be stapled is kept, with the
+#      line that finishes it
 #
 # A run that stops (3, 3a, 4, 8, 9, 9b, 10, 11) must remove LUFSBar.pkg and
 # leave the archived LUFSBar_<version>.pkg alone; only a run that completes
@@ -32,7 +38,7 @@
 # so after running this against them, remove what it left there.
 #
 # Usage: release_scripts.sh
-# Takes a few minutes (three Release builds). Leaves nothing in the repository.
+# Takes a few minutes (four Release builds). Leaves nothing in the repository.
 
 set -u
 REPO=${0:A:h}/..
@@ -153,7 +159,9 @@ stale_packages
 : > $CALLS
 NOTARY_STATUS=Invalid bash $COPY/make_pkg.sh > $WORK/make_pkg-invalid.log 2>&1
 STATUS=$?
-if (( STATUS != 0 )) && refused_cleanly && ! grep -q "^xcrun stapler staple" $CALLS \
+if ! grep -q "^xcrun notarytool submit" $CALLS; then
+    result FAIL "9b make_pkg.sh (exit $STATUS) stopped before notarization: see $WORK/make_pkg-invalid.log"
+elif (( STATUS != 0 )) && refused_cleanly && ! grep -q "^xcrun stapler staple" $CALLS \
    && [[ ! -e $COPY/dist/LUFSBar_$VERSION-unstapled.pkg ]]; then
     result PASS "9b a package reported Invalid was not stapled or kept, and the archive was kept"
 else
@@ -169,10 +177,20 @@ STAPLE_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-nostaple.log 2>&1
 STATUS=$?
 KEPT=$COPY/dist/LUFSBar_$VERSION-unstapled.pkg
 if (( STATUS != 0 )) && [[ -f $KEPT ]] && refused_cleanly \
-   && grep -q "xcrun stapler staple \"$KEPT\" && xcrun stapler validate" $WORK/make_pkg-nostaple.log; then
+   && grep -q "xcrun stapler staple \"$KEPT\" && xcrun stapler validate \"$KEPT\" && cp \"$KEPT\" \"$COPY/dist/LUFSBar.pkg.partial\" && pkgutil --check-signature" $WORK/make_pkg-nostaple.log; then
     result PASS "10 a notarized package that could not be stapled was kept as $(basename $KEPT), with one line to finish it"
 else
     result FAIL "10 make_pkg.sh (exit $STATUS) after the staple failed: kept: $([[ -f $KEPT ]] && print yes || print no), dist/ holds $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')"
+fi
+
+# 10b. The kept package from 10 is still there; a new run builds again (and is
+# turned down, which does not matter here).
+stale_packages
+NOTARY_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-supersede.log 2>&1
+if [[ ! -e $KEPT ]]; then
+    result PASS "10b a run that built a new package removed the kept one it supersedes"
+else
+    result FAIL "10b a kept package from an earlier run survived a run that built a new one"
 fi
 rm -f $KEPT
 
@@ -180,10 +198,12 @@ rm -f $KEPT
 stale_packages
 CP_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-cp.log 2>&1
 STATUS=$?
-if (( STATUS != 0 )) && [[ ! -e $COPY/dist/LUFSBar.pkg ]]; then
-    result PASS "11 a copy that stopped part way was not left as LUFSBar.pkg"
+if ! grep -q "^\[5/5\]" $WORK/make_pkg-cp.log; then
+    result FAIL "11 make_pkg.sh (exit $STATUS) stopped before the copy: see $WORK/make_pkg-cp.log"
+elif (( STATUS != 0 )) && refused_cleanly; then
+    result PASS "11 a copy that stopped part way was not left as LUFSBar.pkg, and the archive was kept"
 else
-    result FAIL "11 make_pkg.sh (exit $STATUS) left LUFSBar.pkg after its copy failed: $(cat $COPY/dist/LUFSBar.pkg 2>/dev/null | head -c 20)"
+    result FAIL "11 make_pkg.sh (exit $STATUS) after its copy failed: LUFSBar.pkg $([[ -e $COPY/dist/LUFSBar.pkg ]] && print left || print gone), archive $([[ $(cat $PKG 2>/dev/null) == old ]] && print kept || print replaced)"
 fi
 
 # 8. No signing identity at all: no SIGNER, and no signer file under HOME.
@@ -273,6 +293,16 @@ elif (( STATUS != 0 )) && ! grep -q "^xcrun stapler staple" $CALLS; then
     result PASS "12 notarize.sh stopped when the report said Invalid"
 else
     result FAIL "12 notarize.sh (exit $STATUS) stapled an app reported Invalid"
+fi
+
+# 13. notarize.sh, with the app accepted and the staple failing.
+STAPLE_FAIL=1 LUFSBAR_RELEASE_DIR=$WORK/release13 bash $COPY7/notarize.sh > $WORK/notarize-nostaple.log 2>&1
+STATUS=$?
+APP13=$WORK/release13/LUFSBar-release/notarize/LUFSBar.app
+if (( STATUS != 0 )) && [[ -d $APP13 ]] && grep -q "xcrun stapler staple \"$APP13\" && xcrun stapler validate" $WORK/notarize-nostaple.log; then
+    result PASS "13 an app that could not be stapled was kept, with the line that finishes it"
+else
+    result FAIL "13 notarize.sh (exit $STATUS) after the staple failed: app kept: $([[ -d $APP13 ]] && print yes || print no), finishing line: $(grep -c 'xcrun stapler staple' $WORK/notarize-nostaple.log)"
 fi
 
 exit $FAILED

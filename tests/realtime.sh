@@ -12,6 +12,8 @@
 #      failure tears down the tap and aggregate it had made           (A-10b, B6)
 #   5  a start that fails twice (LUFSBAR_FAIL_START_TIMES=2) is tried again
 #      and gets going, without the "system audio access" panel           (B6)
+#   6  no test switch is first read on the audio thread (reading one builds
+#      the whole environment: allocations and locks)                    (B5)
 #
 # Usage: realtime.sh <LUFSBar.app> <tone.wav>
 # Plays the tone on the current default output. Quits the app when done.
@@ -63,6 +65,14 @@ if [[ $GAP != none ]] && (( GAP >= 0.9 && GAP <= 1.1 )); then
     result PASS "3 the level line comes every ${GAP} s"
 else
     result FAIL "3 the level line comes every ${GAP} s (want about 1 s, from the main thread)"
+fi
+
+# Meters were asked for dozens of times above, from the audio thread.
+OFF_MAIN_SWITCHES=$(print -r -- $LOGTEXT | grep "was read off the main thread" | sed 's/.*test switch //' | sort -u | tr '\n' ' ')
+if (( BUILT > 0 )) && [[ -z $OFF_MAIN_SWITCHES ]]; then
+    result PASS "6 no test switch was read on the audio thread"
+else
+    result FAIL "6 test switches read off the main thread: ${OFF_MAIN_SWITCHES:-none, but no meter was built}"
 fi
 
 # 4. A start that fails part way.

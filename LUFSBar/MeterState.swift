@@ -46,10 +46,12 @@ final class MeterState: ObservableObject {
     // Reference snapshot: shows the difference against the I/S/TP saved with one click.
     @Published private(set) var referenceSnapshot: ReferenceSnapshot?
 
-    // Set when building the tap (at launch, or on a rebuild after the default output,
-    // stereo pair, rate or streams changed) still fails after its retries, at the
-    // tap, the aggregate device, the IOProc or AudioDeviceStart; cleared by the
-    // next build that succeeds.
+    // Set by SystemAudioTap after four failed builds of the tap in a row, whatever
+    // failed (reading the default output, its UID or rate, the tap, the aggregate
+    // device, the IOProc, AudioDeviceStart); the retries go on behind it. Cleared when
+    // a build succeeds or there is no output to build on. A meter that cannot be
+    // built does not set it. In practice it is seldom about the permission: without
+    // it the API raises no error and delivers silence, which the hint above covers.
     @Published private(set) var audioAccessError = false
 
     // When postinstall auto-launches the app via launchctl asuser, that first session
@@ -106,9 +108,10 @@ final class MeterState: ObservableObject {
         }
     }
 
-    // Uses the LUFS absolute gate (-70) as the display floor. Hides the transient nonsense
-    // right after silence (momentary can pass a finite value below -1000 before -inf) and
-    // stops the menu bar width wobbling as the digit count changes.
+    // Uses the LUFS absolute gate (-70) as the display floor: below it a figure shows as
+    // "--", as silence does. It used to show as "-70.0", which reads like a level, for a
+    // stream carrying next to nothing as much as for the transient right after silence
+    // (momentary can pass a finite value below -1000 before -inf).
     private static let displayFloor: Double = -70
 
     // Audio, for the hint, is what BS.1770 counts as programme: a Momentary at or above
@@ -306,7 +309,7 @@ final class MeterState: ObservableObject {
 
         if selectedValue.isFinite {
             // An exponential moving average smooths the display only. Not from below
-            // the floor, which shows as the floor anyway: from a near-silent -870 it
+            // the floor, which shows as "--" anyway: from a near-silent -870 it
             // took 13 polls to climb back into view, where after digital silence the
             // figure appears at once.
             if displaySmoothedValue >= Self.displayFloor {
@@ -326,17 +329,15 @@ final class MeterState: ObservableObject {
     }
 
     static func format(_ value: Double, compact: Bool = false) -> String {
-        guard value.isFinite else { return compact ? padded("--") : silentText }
-        let clamped = max(value, displayFloor)
-        let raw = String(format: "%.1f", clamped)
+        guard value >= displayFloor else { return compact ? padded("--") : silentText }
+        let raw = String(format: "%.1f", value)
         let numberPart = padded(raw)
         return compact ? numberPart : numberPart + String(nbsp) + "LUFS"
     }
 
     /// A plain numeric readout for places without the menu bar fixed-width constraint.
     static func displayString(_ value: Double) -> String {
-        guard value.isFinite else { return "--" }
-        let clamped = max(value, displayFloor)
-        return String(format: "%.1f", clamped)
+        guard value >= displayFloor else { return "--" }
+        return String(format: "%.1f", value)
     }
 }
