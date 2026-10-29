@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # below, spelled out here because release_settings.sh, which names it, can
 # itself stop the run. The archived package of each version
 # (LUFSBar_<version>.pkg) is only replaced by a run that completes.
-rm -f "$HERE/dist/LUFSBar.pkg"
+rm -f "$HERE/dist/LUFSBar.pkg" "$HERE/dist/LUFSBar.pkg.partial"
 
 # Name, version, work folder and signing identity: see release_settings.sh.
 source "$HERE/release_settings.sh"
@@ -30,6 +30,11 @@ PKG_SIGNED="$DIST_DIR/${APP_NAME}_${VERSION}.pkg"
 # once every step has gone through, so nothing unfinished ever sits there under
 # a finished package's name, whatever stops the run.
 PKG_BUILD="$WORK/${APP_NAME}_${VERSION}.pkg"
+# Where a package Apple accepted but that could not be stapled is kept: in dist/,
+# which nothing cleans (the work folder is wiped by the next run, and macOS
+# empties the temporary folder of files left for three days), under a name no
+# one would upload.
+PKG_UNSTAPLED="$DIST_DIR/${APP_NAME}_${VERSION}-unstapled.pkg"
 # A copy without the version number. Uploading it to GitHub Releases under this
 # name makes releases/latest/download/LUFSBar.pkg always point at the newest build.
 PKG_LATEST="$DIST_DIR/${APP_NAME}.pkg"
@@ -121,21 +126,24 @@ fi
 
 # ---- Step 2: notarize the pkg ----
 echo "[2/5] notarize pkg (submit & wait) ..."
-xcrun notarytool submit "$PKG_BUILD" \
-    --keychain-profile "$NOTARY_PROFILE" --wait
+if ! notarize_and_wait "$PKG_BUILD"; then
+    echo "ERROR: Apple did not accept the package (see the report above)."
+    exit 1
+fi
 
 # ---- Step 3: staple ----
 #   Apple has accepted the package by now, so a failure here (the ticket not
-#   yet reachable, the network gone) leaves it where it is, to be stapled by
-#   hand, rather than costing another signing and notarization.
+#   yet reachable, the network gone) keeps it, to be stapled by hand, rather
+#   than costing another signing and notarization.
 echo "[3/5] staple ..."
 if ! xcrun stapler staple "$PKG_BUILD" || ! xcrun stapler validate "$PKG_BUILD"; then
+    mv -f "$PKG_BUILD" "$PKG_UNSTAPLED"
     echo "ERROR: the package was notarized but could not be stapled."
-    echo "It is still in the work folder (running this script again would build and"
-    echo "notarize a new one). Wait a little, then finish it by hand:"
-    echo "  xcrun stapler staple \"$PKG_BUILD\""
-    echo "  mv \"$PKG_BUILD\" \"$PKG_SIGNED\""
-    echo "  cp \"$PKG_SIGNED\" \"$PKG_LATEST\""
+    echo "It is kept as $PKG_UNSTAPLED"
+    echo "(running this script again would build and notarize a new one)."
+    echo "Wait a little, then finish it with this one line, which stops at the"
+    echo "first step that fails:"
+    echo "  xcrun stapler staple \"$PKG_UNSTAPLED\" && xcrun stapler validate \"$PKG_UNSTAPLED\" && mv \"$PKG_UNSTAPLED\" \"$PKG_SIGNED\" && cp \"$PKG_SIGNED\" \"$PKG_LATEST\""
     exit 1
 fi
 
@@ -146,11 +154,15 @@ pkgutil --check-signature "$PKG_BUILD"
 
 # ---- Step 5: into dist/, with a version-less copy for the GitHub Releases upload ----
 #   A plain copy of an already signed and stapled file, so the signature and the
-#   notarization ticket stay valid.
+#   notarization ticket stay valid. Copied under another name and renamed once
+#   checked, so a copy that stops part way (a full disk) is not left as the
+#   upload asset.
 echo "[5/5] move into dist/ and copy the version-less release asset ..."
 mv -f "$PKG_BUILD" "$PKG_SIGNED"
-cp "$PKG_SIGNED" "$PKG_LATEST"
-pkgutil --check-signature "$PKG_LATEST"
+rm -f "$PKG_UNSTAPLED"
+cp "$PKG_SIGNED" "$PKG_LATEST.partial"
+pkgutil --check-signature "$PKG_LATEST.partial"
+mv -f "$PKG_LATEST.partial" "$PKG_LATEST"
 
 echo ""
 echo "=========================================="

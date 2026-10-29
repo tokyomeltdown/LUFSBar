@@ -97,8 +97,10 @@ codesign -d --entitlements :- "$APP_TMP"
 echo "[4/6] notarize (submit & wait) ..."
 rm -f "$ZIP_NOTARIZE"
 ditto -c -k --keepParent "$APP_TMP" "$ZIP_NOTARIZE"
-xcrun notarytool submit "$ZIP_NOTARIZE" \
-    --keychain-profile "$NOTARY_PROFILE" --wait
+if ! notarize_and_wait "$ZIP_NOTARIZE"; then
+    echo "ERROR: Apple did not accept the app (see the report above)."
+    exit 1
+fi
 
 # ---- Step 5: staple the ticket to the .app and validate ----
 echo "[5/6] staple ..."

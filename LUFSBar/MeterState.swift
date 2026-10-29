@@ -111,13 +111,22 @@ final class MeterState: ObservableObject {
     // stops the menu bar width wobbling as the digit count changes.
     private static let displayFloor: Double = -70
 
-    // Audio, for the hint and the silence reset, is what BS.1770 counts as programme: a
-    // Momentary at or above the absolute gate. Below it is silence, digital zero or not.
-    // Until 1.1 only -inf was silence, so a stream that carries next to nothing (a
-    // browser tab can keep one open; it reads about -870 LUFS) kept the hint away for
-    // good and the reset from ever happening, and the next track was added to the last.
+    // Audio, for the hint, is what BS.1770 counts as programme: a Momentary at or above
+    // the absolute gate. Until 1.1 any figure at all counted, so a stream that carries
+    // next to nothing (a browser tab can keep one open; it reads about -870 LUFS) kept
+    // the hint away for good.
     private static func isAudible(_ momentary: Double) -> Bool {
         momentary >= displayFloor
+    }
+
+    // Silence, for the reset, is quieter still: below -100 LUFS, under any programme's
+    // quietest passage (a general pause or a long decay sits between -100 and -70, and
+    // resetting there cut a piece in two) and over the near-silent streams above. Until
+    // 1.1 only -inf was silence, so with such a stream open the reset never happened
+    // and the next track was added to the last.
+    private static let silenceFloor: Double = -100
+    private static func isSilent(_ momentary: Double) -> Bool {
+        !(momentary >= silenceFloor)
     }
 
     // A normal space (U+0020) can be collapsed by the layout, which makes the menu bar
@@ -138,7 +147,7 @@ final class MeterState: ObservableObject {
     // the anti-flicker pass is applied only when the text is generated.
     private var displaySmoothedValue: Double = -Double.infinity
 
-    // If silence (below the absolute gate, see isAudible) lasts a while, playback is
+    // If silence (see isSilent) lasts a while, playback is
     // assumed to have stopped and Integrated is reset automatically. The decision uses
     // continuous silence so a brief gap between tracks does not trigger it. It resets once
     // per episode, and the flag clears when audio returns.
@@ -273,16 +282,19 @@ final class MeterState: ObservableObject {
             hasEverCapturedRealAudio = true
             neverCapturedPollCount = 0
             if possiblyMissingAudioAccess { possiblyMissingAudioAccess = false }
-            silentPollCount = 0
-            hasAutoResetForCurrentSilence = false
         } else {
             noteNoAudioYet()
+        }
+        if Self.isSilent(momentaryLUFS) {
             silentPollCount += 1
             if silentPollCount >= silenceResetThresholdPolls && !hasAutoResetForCurrentSilence {
                 Self.log.notice("silent for 2 s: starting the measurement over")
                 SystemAudioTap.shared.resetIntegrated()
                 hasAutoResetForCurrentSilence = true
             }
+        } else {
+            silentPollCount = 0
+            hasAutoResetForCurrentSilence = false
         }
 
         let selectedValue: Double
@@ -293,8 +305,11 @@ final class MeterState: ObservableObject {
         }
 
         if selectedValue.isFinite {
-            if displaySmoothedValue.isFinite {
-                // An exponential moving average smooths the display only.
+            // An exponential moving average smooths the display only. Not from below
+            // the floor, which shows as the floor anyway: from a near-silent -870 it
+            // took 13 polls to climb back into view, where after digital silence the
+            // figure appears at once.
+            if displaySmoothedValue >= Self.displayFloor {
                 displaySmoothedValue += (selectedValue - displaySmoothedValue) * 0.2
             } else {
                 displaySmoothedValue = selectedValue

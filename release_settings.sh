@@ -44,3 +44,15 @@ load_signer() {
         exit 1
     fi
 }
+
+# Sends a file to Apple's notary service and waits for the answer, printing the
+# report as it comes. Succeeds only when the report says Accepted: notarytool's
+# exit status says the request went through, which on its own was taken for
+# Apple's yes, and a package Apple turned down was then treated as one that
+# only needed stapling.
+notarize_and_wait() {
+    mkdir -p "$RELEASE_DIR"
+    local report="$RELEASE_DIR/notary-report.txt"
+    xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 | tee "$report"
+    [ "${PIPESTATUS[0]}" = 0 ] && grep -q "status: Accepted" "$report"
+}

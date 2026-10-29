@@ -34,18 +34,28 @@ final class SystemAudioTap {
 
     /// Makes startTap() give up at a named point, so the teardown that runs
     /// when it does can actually be fired.
-    /// LUFSBAR_FAIL_START_AT = uid | tap | aggregate | ioproc | devicestart
-    /// (uid: the default output's UID cannot be read)
+    /// LUFSBAR_FAIL_START_AT = defaultdevice | uid | tap | aggregate | ioproc | devicestart
+    /// (defaultdevice: reading which device is the default output fails;
+    /// uid: the default output's UID cannot be read)
     /// LUFSBAR_FAIL_START_TIMES = n: only the first n attempts fail (default: all).
+    /// LUFSBAR_FAIL_START_ATTEMPTS = 1,2,3,5: only those attempts fail.
     private static let failStartAt = ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_AT"]
     private static var failStartsLeft: Int? =
         TestSwitch.number("LUFSBAR_FAIL_START_TIMES", limit: 1000).map { Int($0) }
+    private static let failStartAttempts: Set<Int>? =
+        ProcessInfo.processInfo.environment["LUFSBAR_FAIL_START_ATTEMPTS"].map {
+            Set($0.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) })
+        }
+    private static var failStartCalls = 0
     /// LUFSBAR_METER_RATE = Hz: the meter request reads this as the rate, for
     /// the first LUFSBAR_METER_RATE_TIMES requests (default: all), the way a
     /// device that is reconfiguring or going away can answer.
     private static let meterRateOverride = TestSwitch.number("LUFSBAR_METER_RATE", limit: 1e9)
     private static var meterRateOverridesLeft: Int? =
         TestSwitch.number("LUFSBAR_METER_RATE_TIMES", limit: 1000).map { Int($0) }
+    /// LUFSBAR_METER_REQUEST_DELAY_MS = n: a meter request waits n ms before the
+    /// main thread takes it up, so a test can rebuild the tap while one waits.
+    private static let meterRequestDelay = TestSwitch.number("LUFSBAR_METER_REQUEST_DELAY_MS", limit: 60_000)
     private static func overriddenMeterRate() -> Double? {
         guard let rate = meterRateOverride else { return nil }
         if let left = meterRateOverridesLeft {
@@ -57,6 +67,8 @@ final class SystemAudioTap {
     }
     private static func shouldFail(at point: String) -> Bool {
         guard failStartAt == point else { return false }
+        failStartCalls += 1
+        if let attempts = failStartAttempts, !attempts.contains(failStartCalls) { return false }
         if let left = failStartsLeft {
             guard left > 0 else { return false }
             failStartsLeft = left - 1
@@ -66,6 +78,12 @@ final class SystemAudioTap {
     }
 
     private var tapID: AudioObjectID = kAudioObjectUnknown
+    /// Which tap this is: one more for every build. A meter request carries the
+    /// one it was made for, so a request left over from the tap before a rebuild
+    /// is dropped instead of being served (and counted) against the new one.
+    /// Written on the main thread before the IOProc exists, read under the
+    /// meter lock.
+    private var generation: UInt64 = 0
     private var aggregateID: AudioObjectID = kAudioObjectUnknown
     private var ioProcID: AudioDeviceIOProcID?
     private var tapDescription: CATapDescription?
@@ -119,34 +137,39 @@ final class SystemAudioTap {
         os_unfair_lock_lock(loudnessMeterLock)
         let alreadyAsked = isBuildingLoudnessMeter
         isBuildingLoudnessMeter = true
+        let askedFor = generation
         os_unfair_lock_unlock(loudnessMeterLock)
         guard !alreadyAsked else { return }
         // Through the main run loop in the common modes, so it is served while a
         // menu is tracking too. The CF call, because it is the one documented as
         // safe from any thread.
-        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
+        let build: () -> Void = { [weak self] in
             guard let self else { return }
-            // The tap can be torn down while this is queued, and a meter put in
-            // afterwards would show figures nothing is feeding. stopTap() has
-            // already lowered the flag in that case.
-            guard self.ioProcID != nil else { return }
+            // The tap can be torn down, and another built, while this is queued.
+            // A meter put on a tap that is gone would show figures nothing
+            // feeds, and one put on the next tap was asked for by the old one.
+            // Nothing is touched: stopTap() lowered the flag, and the new tap
+            // asks for its own.
+            guard self.ioProcID != nil, self.generation == askedFor else {
+                Self.log.notice("dropping a meter request from an earlier tap")
+                return
+            }
             // The rate comes from the HAL, and a device that is reconfiguring
             // or going away can report anything, or nothing. When there is no
-            // meter to be had, the flag stays up (lowering it would have the
-            // next callback ask again, a hundred times a second) and the tap is
-            // built again on the retry schedule; stopTap() lowers the flag.
-            // Before, it stayed up for good, and the menu bar showed "--" with
+            // meter to be had, it is asked for again later (see meterFailed);
+            // the tap is not rebuilt for it, which would not help. Before,
+            // the flag stayed up for good, and the menu bar showed "--" with
             // the audio playing until something else rebuilt the tap.
             guard let nominal = Self.overriddenMeterRate() ?? self.nominalSampleRate(),
                   let sampleRate = LoudnessMeter.sampleRate(fromNominal: nominal) else {
-                Self.log.error("the aggregate gives no sample rate a meter can be built at; building the tap again")
-                self.noteFailure()
+                Self.log.error("the aggregate gives no sample rate a meter can be built at")
+                self.meterFailed()
                 return
             }
             // ebur128_init only fails on a refused sample rate or a failed malloc.
             guard let meter = LoudnessMeter(sampleRate: sampleRate, channels: UInt32(channels)) else {
-                Self.log.error("the meter could not be built at \(sampleRate) Hz; building the tap again")
-                self.noteFailure()
+                Self.log.error("the meter could not be built at \(sampleRate) Hz")
+                self.meterFailed()
                 return
             }
             os_unfair_lock_lock(self.loudnessMeterLock)
@@ -162,11 +185,41 @@ final class SystemAudioTap {
             os_unfair_lock_unlock(self.loudnessMeterLock)
             self.retire(retired)
             guard installed else { return }
-            // Only a meter in place counts as working again (see failures).
-            self.failures = 0
+            self.meterFailures = 0
             Self.log.notice("LoudnessMeter init sampleRate=\(sampleRate) channels=\(channels) of tapChannels=\(tapChannels) buffers=\(buffers) on the \(Thread.isMainThread ? "main" : "audio", privacy: .public) thread")
         }
+        if let ms = Self.meterRequestDelay {
+            // Test only, so the allocation this makes on the audio thread is
+            // no matter.
+            DispatchQueue.main.asyncAfter(deadline: .now() + ms / 1000, execute: build)
+            return
+        }
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue, build)
         CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
+
+    /// Meters that could not be built in a row on this tap. Counted apart from
+    /// failed builds: the tap is running, so this is no matter of access, and
+    /// no panel is shown for it.
+    private var meterFailures = 0
+    private var meterRetry: Timer?
+
+    /// Lets the next callback ask for a meter again, after a wait from the same
+    /// schedule as the builds. Until then the flag stays up and nothing asks.
+    /// Main thread only.
+    private func meterFailed() {
+        meterFailures += 1
+        let delay = Self.retryDelays[min(meterFailures, Self.retryDelays.count) - 1]
+        Self.log.notice("asking for a meter again in \(delay) s (\(self.meterFailures) failed in a row)")
+        meterRetry?.invalidate()
+        let retry = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            os_unfair_lock_lock(self.loudnessMeterLock)
+            self.isBuildingLoudnessMeter = false
+            os_unfair_lock_unlock(self.loudnessMeterLock)
+        }
+        RunLoop.main.add(retry, forMode: .common)
+        meterRetry = retry
     }
 
     /// The level line, once a second, from the main thread. It used to be
@@ -258,7 +311,7 @@ final class SystemAudioTap {
             switch self {
             case .none: return "nothing"
             case .device(let device): return device.uid
-            case .unreadable(let id): return "object \(id), UID unreadable"
+            case .unreadable(let id): return id == kAudioObjectUnknown ? "unreadable" : "object \(id), UID unreadable"
             }
         }
     }
@@ -383,10 +436,12 @@ final class SystemAudioTap {
         }
     }
 
-    /// Failed builds in a row, however each was asked for, and back to 0 only
-    /// once a meter is in place: a tap that starts but gets no meter has not
-    /// recovered, and counting it as working would retry it every second for
-    /// good, with no panel.
+    /// Failed builds in a row, however each was asked for, and back to 0 once a
+    /// tap starts. (It used to wait for a meter, which only comes once audio
+    /// plays, so on a Mac playing nothing to the default output the failures
+    /// of one episode were still counted in the next, hours later, and one
+    /// hiccup on an output switch brought the panel and a long wait.) A meter
+    /// that cannot be built is counted apart, in meterFailures.
     private var failures = 0
     /// The access panel comes with this many failures in a row (about 3 s).
     private static let failuresBeforePanel = 4
@@ -403,9 +458,9 @@ final class SystemAudioTap {
     private enum StartResult { case started, waiting, failed }
 
     /// Every build of the tap comes through here: start(), a change of default
-    /// output, a change on the bound device, a retry, and a meter that could not
-    /// be built. One place keeps the count of failures, so no caller can start
-    /// it over.
+    /// output, a change on the bound device, and a retry. One place keeps the
+    /// count of failures, so no caller can start it over, and only a failed
+    /// build schedules a retry, so there is never more than one.
     private func rebuild() {
         startRetry?.invalidate()
         startRetry = nil
@@ -435,6 +490,7 @@ final class SystemAudioTap {
     /// Builds the tap on the default output. Only through rebuild(), which tears
     /// the last one down first.
     private func startTap() -> StartResult {
+        generation &+= 1
         // Test only: a rebuilt tap waits its own n seconds before stalling.
         stallAtTicks = 0
         // Bound to the default output's stream rather than tapping everything.
@@ -447,7 +503,7 @@ final class SystemAudioTap {
         // speakers. Bound, the tap carries that one device at its own channel
         // count, at the source's level, with nothing to correct.
         // The trade-off: audio sent to any other device is not measured at all.
-        var output = Self.defaultOutput()
+        var output = Self.defaultOutput(failingTheRead: Self.shouldFail(at: "defaultdevice"))
         if case .device(let device) = output, Self.shouldFail(at: "uid") {
             output = .unreadable(device.id)
         }
@@ -460,7 +516,11 @@ final class SystemAudioTap {
             Self.log.notice("no default output device; waiting for one")
             return .waiting
         case .unreadable(let id):
-            Self.log.error("the default output (object \(id)) did not give its UID")
+            if id == kAudioObjectUnknown {
+                Self.log.error("the default output could not be read")
+            } else {
+                Self.log.error("the default output (object \(id)) did not give its UID")
+            }
             return .failed
         case .device(let found):
             device = found
@@ -555,6 +615,7 @@ final class SystemAudioTap {
             return .failed
         }
         started = true
+        failures = 0
         Self.log.notice("capture started")
         MeterState.shared.clearAudioAccessError()
         return .started
@@ -602,8 +663,12 @@ final class SystemAudioTap {
             tapID = kAudioObjectUnknown
         }
         setLoudnessMeter(nil)
-        // A request still queued finds no IOProc and gives up; one that failed
-        // left this up on purpose. Either way the next tap may ask again.
+        // A request still queued finds no IOProc, or another tap's generation,
+        // and gives up; one that failed left this up on purpose. Either way
+        // the next tap may ask again.
+        meterRetry?.invalidate()
+        meterRetry = nil
+        meterFailures = 0
         os_unfair_lock_lock(loudnessMeterLock)
         isBuildingLoudnessMeter = false
         os_unfair_lock_unlock(loudnessMeterLock)
@@ -687,14 +752,18 @@ final class SystemAudioTap {
         return StereoPair()
     }
 
-    /// The Mac's current default output.
-    private static func defaultOutput() -> DefaultOutput {
+    /// The Mac's current default output. `failingTheRead` is the test switch
+    /// (LUFSBAR_FAIL_START_AT = defaultdevice).
+    private static func defaultOutput(failingTheRead: Bool = false) -> DefaultOutput {
         var deviceID = AudioObjectID(kAudioObjectUnknown)
         var deviceIDSize = UInt32(MemoryLayout<AudioObjectID>.size)
-        let deviceErr = AudioObjectGetPropertyData(
+        let deviceErr = failingTheRead ? kAudioHardwareUnspecifiedError : AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject), &defaultOutputDeviceAddress, 0, nil, &deviceIDSize, &deviceID
         )
-        guard deviceErr == noErr, deviceID != kAudioObjectUnknown else { return .none }
+        // A read that fails is not "no output": nothing would tell the app to
+        // look again, so it is a failed build, tried again on the schedule.
+        guard deviceErr == noErr else { return .unreadable(AudioObjectID(kAudioObjectUnknown)) }
+        guard deviceID != kAudioObjectUnknown else { return .none }
 
         var uidAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,

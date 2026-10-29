@@ -47,11 +47,12 @@ finish() {
     killall LUFSBar 2>/dev/null
     print "log: /usr/bin/log show --start \"$LAUNCHED\" --predicate 'subsystem == \"$APPLOG_SUBSYSTEM\"' --style compact"
 }
-trap finish EXIT
 
 if pgrep -x LUFSBar >/dev/null || pgrep -x "LUFSBar Pro" >/dev/null; then
     print "quit LUFSBar and LUFSBar Pro first"; exit 2
 fi
+# Only now: on the way out it quits LUFSBar, which above is someone's own copy.
+trap finish EXIT
 # A misspelt device would otherwise play nothing and pass the "nothing
 # measured" checks, so every name is resolved before anything runs.
 for device in "$MULTI" "$STEREO" ${THIRD:+"$THIRD"}; do

@@ -11,9 +11,13 @@
 #   5  a Launch at Login change that fails puts the toggle back       (B8)
 #   6  callbacks stop for 4 s mid-programme and resume: the meter
 #      starts over rather than carrying the old programme on
-#   7  2 s of near silence (-100 dBFS, below the -70 LUFS absolute gate)
-#      between two programmes starts the measurement over, as digital
-#      silence does
+#   7  2 s of near silence (-110 dBFS, below the -100 LUFS the silence
+#      reset counts as silence) between two programmes starts the
+#      measurement over, as digital silence does
+#   8  4 s at -85 dBFS in the middle of a programme (a general pause, a
+#      long decay: below the -70 LUFS gate, above -100) does not
+#      (the menu bar after near silence, and these two thresholds, are also
+#      checked off the device: build_meter_tests.sh, meter_state)
 #
 # The menu bar item may be hidden (behind the notch, or turned off in System
 # Settings > Menu Bar), so the menu and Settings are opened by test switches
@@ -36,8 +40,10 @@ quit_app() {
     killall LUFSBar 2>/dev/null
     for _ in {1..10}; do pgrep -x LUFSBar >/dev/null || return 0; sleep 1; done
 }
+TONES=
 finish() {
     quit_app
+    [[ -n $TONES ]] && rm -rf $TONES
     if [[ -n $SAVED_METRIC ]]; then defaults write $DOMAIN menuBarMetric -string $SAVED_METRIC
     else defaults delete $DOMAIN menuBarMetric 2>/dev/null; fi
 }
@@ -53,6 +59,11 @@ if pgrep -x LUFSBar >/dev/null || pgrep -x "LUFSBar Pro" >/dev/null; then
 fi
 # Only now: on the way out it quits LUFSBar, which above is someone's own copy.
 trap finish EXIT
+TONES=$(mktemp -d)
+for spec in "-110 4 quiet110" "-85 4 quiet85" "-30 6 low"; do
+    "$BIN/make_tone" ${${=spec}[1]} ${${=spec}[2]} 48000 $TONES/${${=spec}[3]}.wav \
+        || { print "could not make the test tones"; exit 2; }
+done
 defaults delete $DOMAIN menuBarMetric 2>/dev/null
 
 # 1. The tap stops being fed 6 s after its first callback, with the tone still
@@ -175,19 +186,15 @@ else
     result FAIL "6 after a 4 s stall the meter carried on: first short-term $S6 (want -19 or lower)"
 fi
 
-# 7. -18 dBFS for 5 s, then -100 dBFS for 4 s, then -30 dBFS. If the near
+# 7. -18 dBFS for 5 s, then -110 dBFS for 4 s, then -30 dBFS. If the near
 # silence started the measurement over, true peak and Integrated read the last
 # part alone (about -30); if not, true peak still holds -18 and Integrated
 # blends the two.
-TONES=$(mktemp -d)
-"$BIN/make_tone" -100 4 48000 $TONES/quiet.wav && "$BIN/make_tone" -30 6 48000 $TONES/low.wav \
-    || { print "could not make the tones for 7"; exit 2; }
 SINCE=$(mark)
 launch
-afplay "$TONE"; afplay $TONES/quiet.wav; afplay $TONES/low.wav
+afplay "$TONE"; afplay $TONES/quiet110.wav; afplay $TONES/low.wav
 LAST=$(level_lines "$SINCE" | tail -1)
 quit_app
-rm -rf $TONES
 RESET=$(applog_since "$SINCE" | grep -c "silent for 2 s")
 TP7=$(print -r -- $LAST | grep -o " TP=-*[0-9.]*" | cut -c5-)
 I7=$(print -r -- $LAST | grep -o " I=-*[0-9.]*" | cut -c4-)
@@ -195,6 +202,20 @@ if [[ -n $TP7 && -n $I7 ]] && (( TP7 <= -29 && I7 <= -29 )); then
     result PASS "7 the near silence started the measurement over: TP $TP7, I $I7 ($RESET silence resets logged)"
 else
     result FAIL "7 the near silence did not start the measurement over: TP ${TP7:-none}, I ${I7:-none} (want -29 or lower)"
+fi
+
+# 8. -18 dBFS for 5 s, -85 dBFS for 4 s, -18 dBFS again: one programme with a
+# quiet passage, which must not be cut in two.
+SINCE=$(mark)
+launch
+afplay "$TONE"; afplay $TONES/quiet85.wav; afplay "$TONE"
+LOGTEXT=$(applog_since "$SINCE")
+quit_app
+RESET=$(print -r -- $LOGTEXT | grep -c "silent for 2 s")
+if (( RESET == 0 )); then
+    result PASS "8 a quiet passage at -85 dBFS did not start the measurement over"
+else
+    result FAIL "8 a quiet passage at -85 dBFS started the measurement over ($RESET times)"
 fi
 
 exit $FAILED

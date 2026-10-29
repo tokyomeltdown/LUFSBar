@@ -51,9 +51,13 @@ quit_app() {
     killall LUFSBar 2>/dev/null
     for _ in {1..10}; do pgrep -x LUFSBar >/dev/null || return 0; sleep 1; done
 }
-# The loudest Momentary the level lines show, or "none" when none had a figure.
+# The loudest Momentary or Short-term the level lines show, or "none" when none
+# had a figure. Short-term too, because it holds a short sound for 3 s: the
+# lines come once a second, and a 0.3 s notification can fall between two of
+# them in Momentary alone.
 loudest() {
-    print -r -- $1 | grep " M=" | sed -n 's/.* M=\(-\{0,1\}[0-9][0-9.]*\) .*/\1/p' | sort -g | tail -1 | grep . || print none
+    print -r -- $1 | grep " M=" | sed -n 's/.* M=\(-\{0,1\}[0-9][0-9.]*\) S=\(-\{0,1\}[0-9][0-9.]*\) .*/\1\
+\2/p; s/.* M=\(-\{0,1\}[0-9][0-9.]*\) S=-- .*/\1/p; s/.* M=-- S=\(-\{0,1\}[0-9][0-9.]*\) .*/\1/p' | sort -g | tail -1 | grep . || print none
 }
 
 # Runs one case: $1 the case number, $2 what plays to the default output
@@ -67,7 +71,10 @@ run_case() {
     if [[ -n $quiet ]]; then
         "$BIN/tone_to_device" "$DEFAULT" 100 $quiet >/dev/null & quiet_pid=$!
     fi
-    "$BIN/tone_to_device" "$OTHER" 100 "$TONE" >/dev/null || { result FAIL "$n the tone did not play"; quit_app; return; }
+    if ! "$BIN/tone_to_device" "$OTHER" 100 "$TONE" >/dev/null; then
+        [[ -n $quiet_pid ]] && kill $quiet_pid 2>/dev/null
+        result FAIL "$n the tone did not play"; quit_app; return
+    fi
     [[ -n $quiet_pid ]] && wait $quiet_pid
     pgrep -x LUFSBar >/dev/null || { result FAIL "$n LUFSBar is not running"; return; }
     local logtext=$(applog_since "$since")

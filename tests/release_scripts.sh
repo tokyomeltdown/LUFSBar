@@ -16,12 +16,17 @@
 #   8  make_pkg.sh stopped for want of a signing identity removes the
 #      version-less LUFSBar.pkg (the one that gets uploaded) and keeps the
 #      archived package of this version
-#   9  a package whose notarization fails is not left behind
-#  10  a package that was notarized but could not be stapled is kept in the
-#      work folder, not put in dist/ and not thrown away
+#   9  a package whose notarization fails does not reach dist/
+#  9b  nor does one Apple turned down while notarytool exited 0: the report
+#      has to say Accepted
+#  10  a package that was notarized but could not be stapled is kept in dist/
+#      as LUFSBar_<version>-unstapled.pkg, with one chained line to finish it
+#  11  a copy of the upload asset that stops part way is not left as it
+#  12  notarize.sh, too, stops when the report does not say Accepted
 #
-# A run that stops (3, 3a, 4, 8, 9, 10) must remove LUFSBar.pkg and leave the
-# archived LUFSBar_<version>.pkg alone; only a run that completes replaces it.
+# A run that stops (3, 3a, 4, 8, 9, 9b, 10, 11) must remove LUFSBar.pkg and
+# leave the archived LUFSBar_<version>.pkg alone; only a run that completes
+# replaces it.
 #
 # Before the fix the scripts ignore LUFSBAR_RELEASE_DIR and use /tmp/LUFSBar_*,
 # so after running this against them, remove what it left there.
@@ -52,11 +57,25 @@ cat > $STUBS/xcrun <<EOF
 [[ \$1 == notarytool || \$1 == stapler ]] || exec /usr/bin/xcrun "\$@"
 print "xcrun \$*" >> $CALLS
 # "stapler validate" answers what STAPLE_VALID says (0 = stapled), "stapler
-# staple" fails when STAPLE_FAIL is set, and "notarytool" when NOTARY_FAIL is.
+# staple" fails when STAPLE_FAIL is set, and "notarytool" fails when
+# NOTARY_FAIL is set, or reports the status NOTARY_STATUS (default Accepted)
+# and exits 0, as it does for any answer from Apple.
 [[ \$1 == stapler && \$2 == validate ]] && exit \${STAPLE_VALID:-0}
 [[ \$1 == stapler && \$2 == staple && -n \${STAPLE_FAIL:-} ]] && exit 1
-[[ \$1 == notarytool && -n \${NOTARY_FAIL:-} ]] && exit 1
+if [[ \$1 == notarytool ]]; then
+    [[ -n \${NOTARY_FAIL:-} ]] && exit 1
+    print "  status: \${NOTARY_STATUS:-Accepted}"
+fi
 exit 0
+EOF
+cat > $STUBS/cp <<EOF
+#!/bin/zsh
+# With CP_FAIL set, a copy into dist/ writes part of the file and fails, as a
+# full disk would; otherwise the real cp.
+if [[ -n \${CP_FAIL:-} && \${@[-1]} == */dist/* ]]; then
+    print partial > \${@[-1]}; exit 1
+fi
+exec /bin/cp "\$@"
 EOF
 cat > $STUBS/pkgutil <<EOF
 #!/bin/zsh
@@ -129,17 +148,42 @@ else
     result FAIL "9 make_pkg.sh (exit $STATUS) after notarization failed: dist/ holds $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')(want the old archive only)"
 fi
 
-# 10. Notarized, but the staple fails: the package Apple accepted is kept where
-# it can be stapled by hand, and dist/ is left as a stopped run leaves it.
+# 9b. Apple turns the package down, and notarytool exits 0 as it does.
+stale_packages
+: > $CALLS
+NOTARY_STATUS=Invalid bash $COPY/make_pkg.sh > $WORK/make_pkg-invalid.log 2>&1
+STATUS=$?
+if (( STATUS != 0 )) && refused_cleanly && ! grep -q "^xcrun stapler staple" $CALLS \
+   && [[ ! -e $COPY/dist/LUFSBar_$VERSION-unstapled.pkg ]]; then
+    result PASS "9b a package reported Invalid was not stapled or kept, and the archive was kept"
+else
+    result FAIL "9b make_pkg.sh (exit $STATUS) took a package reported Invalid for notarized: dist/ holds $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')"
+fi
+
+# 10. Notarized, but the staple fails: the package Apple accepted is kept in
+# dist/ under a name no one uploads, with the line that finishes it, and the
+# rest of dist/ is left as a stopped run leaves it.
 stale_packages
 : > $CALLS
 STAPLE_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-nostaple.log 2>&1
 STATUS=$?
-KEPT=$LUFSBAR_RELEASE_DIR/LUFSBar-release/pkg/LUFSBar_$VERSION.pkg
-if (( STATUS != 0 )) && [[ -f $KEPT ]] && refused_cleanly && grep -q "stapler staple" $WORK/make_pkg-nostaple.log; then
-    result PASS "10 a notarized package that could not be stapled was kept in the work folder"
+KEPT=$COPY/dist/LUFSBar_$VERSION-unstapled.pkg
+if (( STATUS != 0 )) && [[ -f $KEPT ]] && refused_cleanly \
+   && grep -q "xcrun stapler staple \"$KEPT\" && xcrun stapler validate" $WORK/make_pkg-nostaple.log; then
+    result PASS "10 a notarized package that could not be stapled was kept as $(basename $KEPT), with one line to finish it"
 else
     result FAIL "10 make_pkg.sh (exit $STATUS) after the staple failed: kept: $([[ -f $KEPT ]] && print yes || print no), dist/ holds $(ls $COPY/dist 2>/dev/null | tr '\n' ' ')"
+fi
+rm -f $KEPT
+
+# 11. The copy of the upload asset fails part way.
+stale_packages
+CP_FAIL=1 bash $COPY/make_pkg.sh > $WORK/make_pkg-cp.log 2>&1
+STATUS=$?
+if (( STATUS != 0 )) && [[ ! -e $COPY/dist/LUFSBar.pkg ]]; then
+    result PASS "11 a copy that stopped part way was not left as LUFSBar.pkg"
+else
+    result FAIL "11 make_pkg.sh (exit $STATUS) left LUFSBar.pkg after its copy failed: $(cat $COPY/dist/LUFSBar.pkg 2>/dev/null | head -c 20)"
 fi
 
 # 8. No signing identity at all: no SIGNER, and no signer file under HOME.
@@ -216,6 +260,19 @@ if [[ -f $PKG7 ]] && pkgutil --expand $PKG7 $WORK/expanded7 >/dev/null 2>&1 \
     result PASS "7 with only MARKETING_VERSION set to 9.9.9, the scripts made LUFSBar_9.9.9.pkg"
 else
     result FAIL "7 with only MARKETING_VERSION set to 9.9.9: notarize.sh exit $N_STATUS, no 9.9.9 package (see $WORK/notarize-999.log)"
+fi
+
+# 12. notarize.sh, with Apple turning the app down and notarytool exiting 0.
+# On the copy from 7: the first one's source was broken on purpose for 2.
+: > $CALLS
+NOTARY_STATUS=Invalid LUFSBAR_RELEASE_DIR=$WORK/release12 bash $COPY7/notarize.sh > $WORK/notarize-invalid.log 2>&1
+STATUS=$?
+if ! grep -q "^xcrun notarytool submit" $CALLS; then
+    result FAIL "12 notarize.sh (exit $STATUS) stopped before notarization: see $WORK/notarize-invalid.log"
+elif (( STATUS != 0 )) && ! grep -q "^xcrun stapler staple" $CALLS; then
+    result PASS "12 notarize.sh stopped when the report said Invalid"
+else
+    result FAIL "12 notarize.sh (exit $STATUS) stapled an app reported Invalid"
 fi
 
 exit $FAILED

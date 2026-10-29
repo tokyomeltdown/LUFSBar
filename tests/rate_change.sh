@@ -44,11 +44,12 @@ finish() {
     killall LUFSBar 2>/dev/null
     "$BIN/sample_rate" "$DEVICE" $START_RATE >/dev/null || print "could not put \"$DEVICE\" back to $START_RATE"
 }
-trap finish EXIT
 
 if pgrep -x LUFSBar >/dev/null || pgrep -x "LUFSBar Pro" >/dev/null; then
     print "quit LUFSBar and LUFSBar Pro first"; exit 2
 fi
+# Only now: on the way out it quits LUFSBar, which above is someone's own copy.
+trap finish EXIT
 
 # The figures of the last few level lines since a mark: the most common M and TP.
 steady() {
@@ -109,7 +110,7 @@ switch_and_measure "3 back to $START_RATE Hz while playing" $START_RATE
 
 # 4. Relaunched with the right-click menu opening 3 s in (it closes itself 8 s
 # later); the rate changes 1 s after it opens. Momentary is read from the
-# lines between 4 s after the change and the menu closing; the true peak is
+# lines between 3-4 s after the change and the menu closing; the true peak is
 # left out, since the switch's own transient is in that window.
 killall LUFSBar 2>/dev/null; sleep 2
 LAUNCHED=$(mark)
@@ -119,7 +120,10 @@ applog_wait "$LAUNCHED" 30 "capture started" || { result FAIL "4 capture did not
 applog_wait "$LAUNCHED" 15 "right-click menu opened" || result FAIL "4 the menu did not open"
 sleep 1
 "$BIN/sample_rate" "$DEVICE" $OTHER >/dev/null || result FAIL "4 could not set \"$DEVICE\" to $OTHER"
-sleep 4; READ_FROM=$(mark)
+# 3 s and then the next whole second (mark): 3 to 4 s after the change. Not
+# 4 s and then mark: the menu closes 8 s after it opens, and with the late
+# notice of its opening that left a window with no level line in it.
+sleep 3; READ_FROM=$(mark)
 applog_wait "$LAUNCHED" 15 "right-click menu closed"
 LOG4=$(applog_since "$READ_FROM")
 CLOSED=$(print -r -- $LOG4 | grep "right-click menu closed" | head -1 | awk '{print $2}')
