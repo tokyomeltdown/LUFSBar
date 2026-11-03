@@ -31,7 +31,7 @@ Up to 1.1, LUFSBar measured every device at once and corrected the level by gues
 
 ## Install
 
-1. Download the latest `LUFSBar_x.x.pkg` from [Releases](../../releases/latest)
+1. Download `LUFSBar.pkg` from the latest [Release](../../releases/latest)
 2. Run the installer (signed & notarized by Apple)
 3. Launch LUFSBar from Applications
 4. Grant **System Audio Recording** permission when prompted

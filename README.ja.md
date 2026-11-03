@@ -31,7 +31,7 @@ LUFSBarが測るのは、Macの**今のサウンド出力**（システム設定
 
 ## インストール
 
-1. [Releases](../../releases/latest) から最新の `LUFSBar_x.x.pkg` をダウンロード
+1. 最新の [Release](../../releases/latest) から `LUFSBar.pkg` をダウンロード
 2. インストーラーを実行（Apple署名・公証済み）
 3. アプリケーションからLUFSBarを起動
 4. 「**システムオーディオ録音**」の許可を求められたら許可

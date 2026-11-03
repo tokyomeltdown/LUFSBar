@@ -14,6 +14,10 @@
 #      and gets going, without the "system audio access" panel           (B6)
 #   6  no test switch is first read on the audio thread (reading one builds
 #      the whole environment: allocations and locks)                    (B5)
+#   7  asking for a meter allocates nothing on the audio thread: with
+#      MallocStackLogging, malloc_history shows no allocation on the HAL IO
+#      thread that came through requestLoudnessMeter (it used to hand a
+#      block to the main run loop from there: three mallocs and its lock)
 #
 # Usage: realtime.sh <LUFSBar.app> <tone.wav>
 # Plays the tone on the current default output. Quits the app when done.
@@ -111,6 +115,28 @@ if [[ $STARTED == yes ]] && (( FAILS == 2 && PANEL == 0 )); then
     result PASS "5 two failed starts were tried again and the third went through, with no access panel"
 else
     result FAIL "5 failed starts: $FAILS, capture started: $STARTED, access panel shown: $PANEL (want 2, yes, 0)"
+fi
+
+# 7. Meters dropped every 300 ms (so asked for again and again), every malloc
+# recorded with its stack.
+LAUNCHED=$(mark)
+open --env MallocStackLogging=malloc --env MallocStackLoggingNoCompact=1 --env LUFSBAR_DROP_METER_EVERY_MS=300 "$APP"
+applog_wait "$LAUNCHED" 30 "capture started" || { print "capture did not start within 30 s"; exit 2; }
+afplay "$TONE"
+HISTORY=$(mktemp)
+malloc_history $(pgrep -x LUFSBar) -allEvents > $HISTORY 2>/dev/null
+LOGTEXT=$(applog_since "$LAUNCHED")
+quit_app
+BUILT=$(print -r -- $LOGTEXT | grep -c "LoudnessMeter init")
+ON_IO=$(grep "^ALLOC" $HISTORY | grep "HALC_IOThread" | grep -c "requestLoudnessMeter")
+EVENTS=$(grep -c "^ALLOC" $HISTORY)
+rm -f $HISTORY
+if (( EVENTS == 0 || BUILT < 3 )); then
+    print "cannot test 7: $EVENTS allocations recorded, $BUILT meters built (want some of each)"; exit 2
+elif (( ON_IO == 0 )); then
+    result PASS "7 $BUILT meters asked for, no allocation on the audio thread for it"
+else
+    result FAIL "7 asking for a meter allocated $ON_IO times on the audio thread ($BUILT meters)"
 fi
 
 exit $FAILED

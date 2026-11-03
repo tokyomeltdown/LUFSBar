@@ -98,6 +98,17 @@ final class SystemAudioTap {
     }
 
     private var tapID: AudioObjectID = kAudioObjectUnknown
+    /// The tap on the right channel's stream, when the stereo pair spans two.
+    private var secondTapID: AudioObjectID = kAudioObjectUnknown
+    /// Where the two sides are in what the IOProc is given, when the pair spans
+    /// two streams (nil otherwise). Set on the main thread before the IOProc
+    /// exists and cleared after it is gone.
+    private struct SpanRoute {
+        var buffers: Int
+        var leftBuffer: Int, leftOffset: Int, leftStride: Int
+        var rightBuffer: Int, rightOffset: Int, rightStride: Int
+    }
+    private var spanRoute: SpanRoute?
     /// Which tap this is: one more for every build. A meter request carries the
     /// one it was made for, so a request left over from the tap before a rebuild
     /// is dropped instead of being served (and counted) against the new one.
@@ -118,9 +129,25 @@ final class SystemAudioTap {
         return lock
     }()
     private var _loudnessMeter: LoudnessMeter?
-    /// Set while a meter is being built on the main thread, under the same lock,
-    /// so a second callback does not ask for a second one.
+    /// Up from the moment the audio thread asks for a meter until one is
+    /// installed, the tap is torn down, or (after a meter that could not be
+    /// built) a second has passed; under the same lock. While it is up, no
+    /// callback asks again.
     private var isBuildingLoudnessMeter = false
+    /// What the audio thread asked for, under the same lock: plain values, so
+    /// writing it allocates nothing. Taken up by the main thread's meterPoll.
+    private struct MeterRequest {
+        var channels: Int
+        var replacing: Bool
+        var tapChannels: Int
+        var buffers: Int
+        var generation: UInt64
+        var askedAt: UInt64
+    }
+    private var pendingMeterRequest: MeterRequest?
+    /// Takes up a meter request ten times a second. In the common modes, so it
+    /// goes on while a menu is open.
+    private var meterPoll: Timer?
 
     var loudnessMeter: LoudnessMeter? {
         os_unfair_lock_lock(loudnessMeterLock)
@@ -150,25 +177,42 @@ final class SystemAudioTap {
 
     /// Asks the main thread for a meter with `channels` channels, rather than
     /// building one here: building allocates and asks the HAL for the sample
-    /// rate, and this is called from the IOProc. Metering waits the two or
-    /// three buffers the answer takes. With `replacing`, the current meter is
-    /// swapped for the new one (the tap's layout changed under it).
+    /// rate, and this is called from the IOProc. The request is written down
+    /// under the meter lock the IOProc takes anyway, and meterPoll takes it up
+    /// within 100 ms. (It used to hand a block to the main run loop from here:
+    /// three mallocs, the run loop's lock and a Mach message on the audio
+    /// thread at every tap build. tests/realtime.sh 7.) With `replacing`, the
+    /// current meter is swapped for the new one (the tap's layout changed
+    /// under it).
     private func requestLoudnessMeter(channels: Int, replacing: Bool, tapChannels: Int, buffers: Int) {
         os_unfair_lock_lock(loudnessMeterLock)
-        let alreadyAsked = isBuildingLoudnessMeter
-        isBuildingLoudnessMeter = true
-        let askedFor = generation
+        if !isBuildingLoudnessMeter {
+            isBuildingLoudnessMeter = true
+            pendingMeterRequest = MeterRequest(channels: channels, replacing: replacing, tapChannels: tapChannels,
+                                               buffers: buffers, generation: generation, askedAt: mach_absolute_time())
+        }
         os_unfair_lock_unlock(loudnessMeterLock)
-        guard !alreadyAsked else { return }
-        // Built and installed on the main thread (see below for how it gets there).
-        let build: () -> Void = { [weak self] in
-            guard let self else { return }
-            // The tap can be torn down, and another built, while this is queued.
-            // A meter put on a tap that is gone would show figures nothing
-            // feeds, and one put on the next tap was asked for by the old one.
-            // Nothing is touched: stopTap() lowered the flag, and the new tap
-            // asks for its own.
-            guard self.ioProcID != nil, self.generation == askedFor else {
+    }
+
+    /// meterPoll's work: builds the meter asked for, if any. Main thread only.
+    private func serviceMeterRequest() {
+        os_unfair_lock_lock(loudnessMeterLock)
+        var request = pendingMeterRequest
+        // Test only: LUFSBAR_METER_REQUEST_DELAY_MS holds a request back.
+        if let ms = Self.meterRequestDelay, let held = request,
+           Double(mach_absolute_time() - held.askedAt) * Self.nanosecondsPerTick < ms * 1_000_000 {
+            request = nil
+        }
+        if request != nil { pendingMeterRequest = nil }
+        os_unfair_lock_unlock(loudnessMeterLock)
+        guard let request else { return }
+        let channels = request.channels, replacing = request.replacing
+        let tapChannels = request.tapChannels, buffers = request.buffers
+        do {
+            // stopTap() drops a request it finds, so one from an earlier tap
+            // only gets here in a race with it; a meter put on a tap that is
+            // gone would show figures nothing feeds.
+            guard self.ioProcID != nil, self.generation == request.generation else {
                 Self.log.notice("dropping a meter request from an earlier tap")
                 return
             }
@@ -207,17 +251,6 @@ final class SystemAudioTap {
             self.meterFailures = 0
             Self.log.notice("LoudnessMeter init sampleRate=\(sampleRate) channels=\(channels) of tapChannels=\(tapChannels) buffers=\(buffers) on the \(Thread.isMainThread ? "main" : "audio", privacy: .public) thread")
         }
-        if let ms = Self.meterRequestDelay {
-            // Test only, so the allocation this makes on the audio thread is
-            // no matter.
-            DispatchQueue.main.asyncAfter(deadline: .now() + ms / 1000, execute: build)
-            return
-        }
-        // Through the main run loop in the common modes, so it is served while a
-        // menu is tracking too. The CF call, because it is the one documented as
-        // safe from any thread.
-        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue, build)
-        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     /// Meters that could not be built in a row on this tap, for the log. Counted
@@ -357,12 +390,20 @@ final class SystemAudioTap {
     // changes. It has to be retained, or stop() cannot remove it with the right block.
     private var defaultOutputDeviceListener: AudioObjectPropertyListenerBlock?
 
-    /// Where the device's stereo pair sits: which output stream the tap is bound
-    /// to, and the two channels within it (zero-based).
+    /// Where the device's stereo pair sits: the output stream that holds each
+    /// side, the channel within it (zero-based), and how many channels that
+    /// stream has. Usually both sides are in one stream, and one tap is bound
+    /// to it; when they are in two (Configure Speakers 2-3 on a device whose
+    /// streams are 2 and 10 channels wide, or a device of mono streams), a tap
+    /// is bound to each.
     private struct StereoPair: Equatable {
-        var stream = 0
+        var leftStream = 0
         var left = 0
+        var rightStream = 0
         var right = 1
+        var leftStreamChannels = 2
+        var rightStreamChannels = 2
+        var spansStreams: Bool { leftStream != rightStream }
     }
     private var stereoPair = StereoPair()
     /// The bound device's nominal sample rate when the tap was built. The device
@@ -453,6 +494,12 @@ final class SystemAudioTap {
         }
         RunLoop.main.add(levelLog, forMode: .common)
         levelLogTimer = levelLog
+        meterPoll?.invalidate()
+        let poll = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.serviceMeterRequest()
+        }
+        RunLoop.main.add(poll, forMode: .common)
+        meterPoll = poll
         // LUFSBAR_DROP_METER_EVERY_MS = n: test only. Lets go of the meter every
         // n ms the way a device change does, so the next callback needs a new
         // one. Used with LUFSBAR_METER_HOLD_MS.
@@ -594,21 +641,30 @@ final class SystemAudioTap {
         boundSampleRate = rate
         listenForDeviceChanges(on: device.id)
 
-        let description = CATapDescription()
-        // Mixdown off: with it on, a device-bound tap delivers the right peaks
-        // but half the energy, which is not a waveform to measure loudness on.
-        description.isMixdown = false
-        description.isMono = false
-        description.deviceUID = boundUID
-        // Required. Left unset, the tap is created without complaint and then
-        // never delivers a callback.
-        description.stream = UInt(pair.stream)
-        description.isExclusive = true
-        description.processes = []
-        Self.log.notice("measuring everything on \(boundUID, privacy: .public) (stream \(pair.stream), channels \(pair.left + 1)-\(pair.right + 1))")
-        description.name = "LUFSBar System Tap"
-        description.muteBehavior = .unmuted
-        description.isPrivate = true
+        // One tap per stream the pair is in: one, unless the pair spans two.
+        func describeTap(stream: Int) -> CATapDescription {
+            let description = CATapDescription()
+            // Mixdown off: with it on, a device-bound tap delivers the right peaks
+            // but half the energy, which is not a waveform to measure loudness on.
+            description.isMixdown = false
+            description.isMono = false
+            description.deviceUID = boundUID
+            // Required. Left unset, the tap is created without complaint and then
+            // never delivers a callback.
+            description.stream = UInt(stream)
+            description.isExclusive = true
+            description.processes = []
+            description.name = "LUFSBar System Tap"
+            description.muteBehavior = .unmuted
+            description.isPrivate = true
+            return description
+        }
+        if pair.spansStreams {
+            Self.log.notice("measuring everything on \(boundUID, privacy: .public) (left: stream \(pair.leftStream) channel \(pair.left + 1), right: stream \(pair.rightStream) channel \(pair.right + 1))")
+        } else {
+            Self.log.notice("measuring everything on \(boundUID, privacy: .public) (stream \(pair.leftStream), channels \(pair.left + 1)-\(pair.right + 1))")
+        }
+        let description = describeTap(stream: pair.leftStream)
         tapDescription = description
 
         var newTapID: AudioObjectID = kAudioObjectUnknown
@@ -619,18 +675,32 @@ final class SystemAudioTap {
         }
         tapID = newTapID
         Self.log.notice("tap created id=\(self.tapID)")
+        var subTaps: [[String: Any]] = [
+            [kAudioSubTapUIDKey: description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]
+        ]
+        if pair.spansStreams {
+            let rightDescription = describeTap(stream: pair.rightStream)
+            var rightTapID: AudioObjectID = kAudioObjectUnknown
+            let rightErr = AudioHardwareCreateProcessTap(rightDescription, &rightTapID)
+            guard rightErr == noErr else {
+                Self.log.error("failed to create the tap for the right channel's stream (OSStatus \(rightErr))")
+                return .failed
+            }
+            secondTapID = rightTapID
+            Self.log.notice("tap created id=\(self.secondTapID) (right channel's stream)")
+            subTaps.append([kAudioSubTapUIDKey: rightDescription.uuid.uuidString, kAudioSubTapDriftCompensationKey: true])
+            guard let route = Self.spanRoute(pair: pair, leftTap: tapID, rightTap: rightTapID) else {
+                return .failed
+            }
+            spanRoute = route
+        }
 
         let aggregateDescription: [String: Any] = [
             kAudioAggregateDeviceNameKey: "LUFSBar-Tap-Aggregate",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceTapListKey: [
-                [
-                    kAudioSubTapUIDKey: description.uuid.uuidString,
-                    kAudioSubTapDriftCompensationKey: true
-                ]
-            ]
+            kAudioAggregateDeviceTapListKey: subTaps
         ]
 
         var newAggregateID: AudioObjectID = kAudioObjectUnknown
@@ -673,6 +743,8 @@ final class SystemAudioTap {
         meterDropTimer = nil
         levelLogTimer?.invalidate()
         levelLogTimer = nil
+        meterPoll?.invalidate()
+        meterPoll = nil
         startRetry?.invalidate()
         startRetry = nil
         stopTap()
@@ -703,16 +775,25 @@ final class SystemAudioTap {
             Self.log.notice("tap destroyed id=\(self.tapID) (OSStatus \(status))")
             tapID = kAudioObjectUnknown
         }
+        if secondTapID != kAudioObjectUnknown {
+            let status = AudioHardwareDestroyProcessTap(secondTapID)
+            Self.log.notice("tap destroyed id=\(self.secondTapID) (OSStatus \(status))")
+            secondTapID = kAudioObjectUnknown
+        }
+        spanRoute = nil
         setLoudnessMeter(nil)
-        // A request still queued finds no IOProc, or another tap's generation,
-        // and gives up; one that failed left this up on purpose. Either way
-        // the next tap may ask again.
+        // A request not taken up yet belongs to this tap and goes with it; one
+        // that failed left the flag up on purpose. Either way the next tap may
+        // ask again.
         meterRetry?.invalidate()
         meterRetry = nil
         meterFailures = 0
         os_unfair_lock_lock(loudnessMeterLock)
+        let dropped = pendingMeterRequest != nil
+        pendingMeterRequest = nil
         isBuildingLoudnessMeter = false
         os_unfair_lock_unlock(loudnessMeterLock)
+        if dropped { Self.log.notice("dropping a meter request from an earlier tap") }
     }
 
     /// Resets the Integrated measurement (MeterState, after silence or a stall).
@@ -757,10 +838,11 @@ final class SystemAudioTap {
     }
 
     /// The device's stereo pair (Audio MIDI Setup > Configure Speakers), as the
-    /// output stream that holds it and the two channels within that stream. The
-    /// pair is numbered across all of the device's output streams, so it is
-    /// walked stream by stream. Channels 1-2 of the first stream when the pair
-    /// cannot be read, or when its two channels are not in the same stream.
+    /// output stream that holds each side and the channel within it. The pair
+    /// is numbered across all of the device's output streams, so it is walked
+    /// stream by stream. Channels 1-2 of the first stream when the pair cannot
+    /// be read or a side is in no stream. (A pair across two streams used to
+    /// fall back to that too, and a tone read 3 dB low: tests/streams.sh 2.)
     private static func stereoPair(of device: AudioObjectID) -> StereoPair {
         var channels: [UInt32] = [1, 2]
         var size = UInt32(MemoryLayout<UInt32>.size * 2)
@@ -783,14 +865,23 @@ final class SystemAudioTap {
         guard AudioObjectGetPropertyData(device, &address, 0, nil, &dataSize, raw) == noErr else { return StereoPair() }
 
         var first = 0
+        var found = StereoPair()
+        var foundLeft = false, foundRight = false
         for (stream, buffer) in UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self)).enumerated() {
-            let range = first..<(first + Int(buffer.mNumberChannels))
-            if range.contains(left) && range.contains(right) {
-                return StereoPair(stream: stream, left: left - first, right: right - first)
+            let channels = Int(buffer.mNumberChannels)
+            let range = first..<(first + channels)
+            if range.contains(left) {
+                found.leftStream = stream; found.left = left - first; found.leftStreamChannels = channels
+                foundLeft = true
+            }
+            if range.contains(right) {
+                found.rightStream = stream; found.right = right - first; found.rightStreamChannels = channels
+                foundRight = true
             }
             first = range.upperBound
         }
-        return StereoPair()
+        guard foundLeft, foundRight else { return StereoPair() }
+        return found
     }
 
     /// The Mac's current default output. `failingTheRead` is the test switch
@@ -833,6 +924,55 @@ final class SystemAudioTap {
         return sampleRate
     }
 
+    /// A tap's stream format, or nil when it cannot be read.
+    private static func tapFormat(_ tap: AudioObjectID) -> AudioStreamBasicDescription? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var format = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &format) == noErr,
+              format.mChannelsPerFrame > 0 else { return nil }
+        return format
+    }
+
+    /// Where each side of a pair across two streams arrives in the IOProc: the
+    /// left tap's buffers come first, then the right one's, each either one
+    /// interleaved buffer or one buffer per channel, as its format says (or,
+    /// when the format cannot be read, one interleaved buffer as wide as the
+    /// stream, which is what the taps deliver). The IOProc checks what it gets
+    /// against this and measures nothing if it differs, so a wrong guess shows
+    /// "--", never a wrong figure. Nil, after a log line, when a tap delivers
+    /// something other than 32-bit float, which is all the IOProc reads.
+    private static func spanRoute(pair: StereoPair, leftTap: AudioObjectID, rightTap: AudioObjectID) -> SpanRoute? {
+        func layout(_ tap: AudioObjectID, streamChannels: Int) -> (channels: Int, separate: Bool)? {
+            guard let format = tapFormat(tap) else { return (streamChannels, false) }
+            let isFloat32 = format.mFormatID == kAudioFormatLinearPCM
+                && format.mFormatFlags & kAudioFormatFlagIsFloat != 0 && format.mBitsPerChannel == 32
+            guard isFloat32 else {
+                log.error("a tap delivers a format the meter cannot read (flags \(format.mFormatFlags), \(format.mBitsPerChannel) bits)")
+                return nil
+            }
+            return (Int(format.mChannelsPerFrame), format.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0)
+        }
+        guard let left = layout(leftTap, streamChannels: pair.leftStreamChannels),
+              let right = layout(rightTap, streamChannels: pair.rightStreamChannels),
+              pair.left < left.channels, pair.right < right.channels else { return nil }
+        let leftBuffers = left.separate ? left.channels : 1
+        let rightBuffers = right.separate ? right.channels : 1
+        return SpanRoute(
+            buffers: leftBuffers + rightBuffers,
+            leftBuffer: left.separate ? pair.left : 0,
+            leftOffset: left.separate ? 0 : pair.left,
+            leftStride: left.separate ? 1 : left.channels,
+            rightBuffer: leftBuffers + (right.separate ? pair.right : 0),
+            rightOffset: right.separate ? 0 : pair.right,
+            rightStride: right.separate ? 1 : right.channels
+        )
+    }
+
     /// How many channels the tap delivers: the bound device stream's own count
     /// (ten on a ten output interface), in one interleaved buffer or one buffer
     /// per channel.
@@ -859,6 +999,11 @@ final class SystemAudioTap {
             let now = mach_absolute_time()
             if stallAtTicks == 0 { stallAtTicks = now + stallAfterTicks }
             if now > stallAtTicks && (stallForTicks == 0 || now < stallAtTicks + stallForTicks) { return }
+        }
+
+        if let route = spanRoute {
+            handleSpanningPair(abl, route)
+            return
         }
 
         let available = Self.availableChannels(in: abl)
@@ -913,6 +1058,47 @@ final class SystemAudioTap {
             }
         }
         // Here, once the meter has been fed (see lastFedTicks).
+        lastFedTicks = mach_absolute_time()
+    }
+
+    /// handleAudio for a stereo pair across two streams: one side from each
+    /// tap's buffers, where spanRoute says. Anything other than the layout it
+    /// expects is not measured (the menu bar goes to "--").
+    private func handleSpanningPair(_ abl: UnsafeMutableAudioBufferListPointer, _ route: SpanRoute) {
+        guard abl.count == route.buffers else { return }
+        let leftBuffer = abl[route.leftBuffer], rightBuffer = abl[route.rightBuffer]
+        guard Int(leftBuffer.mNumberChannels) == route.leftStride, Int(rightBuffer.mNumberChannels) == route.rightStride,
+              let leftData = leftBuffer.mData, let rightData = rightBuffer.mData else { return }
+        let tapChannels = route.leftStride + route.rightStride
+        guard let meter = loudnessMeter else {
+            requestLoudnessMeter(channels: 2, replacing: false, tapChannels: tapChannels, buffers: abl.count)
+            return
+        }
+        guard meter.channels == 2 else {
+            requestLoudnessMeter(channels: 2, replacing: true, tapChannels: tapChannels, buffers: abl.count)
+            return
+        }
+        if Self.meterHoldMicroseconds > 0 { usleep(Self.meterHoldMicroseconds) }
+        let frameCount = min(
+            Int(leftBuffer.mDataByteSize) / (MemoryLayout<Float32>.size * route.leftStride),
+            Int(rightBuffer.mDataByteSize) / (MemoryLayout<Float32>.size * route.rightStride)
+        )
+        guard frameCount > 0 else { return }
+        let leftSamples = leftData.assumingMemoryBound(to: Float32.self) + route.leftOffset
+        let rightSamples = rightData.assumingMemoryBound(to: Float32.self) + route.rightOffset
+        interleaveScratch.withUnsafeMutableBufferPointer { scratch in
+            guard let dst = scratch.baseAddress else { return }
+            var done = 0
+            while done < frameCount {
+                let frames = min(frameCount - done, Self.scratchFrames)
+                for frame in 0..<frames {
+                    dst[frame * 2] = leftSamples[(done + frame) * route.leftStride]
+                    dst[frame * 2 + 1] = rightSamples[(done + frame) * route.rightStride]
+                }
+                meter.addInterleavedFrames(dst, frameCount: frames)
+                done += frames
+            }
+        }
         lastFedTicks = mach_absolute_time()
     }
 }
