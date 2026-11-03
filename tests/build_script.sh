@@ -9,8 +9,8 @@
 #   2  on an unchanged copy, build.sh signs with the team's certificate
 #   3  build.sh does not build into a fixed name in the shared /tmp, where
 #      another account could have put a folder or a link first        (S1)
-#   4  the app carries libebur128's licence (COPYING), which its MIT terms
-#      require in every copy                                          (P-01)
+#   4  the app carries libebur128's licence (COPYING) and that of the queue.h
+#      it builds with (COPYING-queue.h), which their terms require     (P-01)
 #
 # Usage: build_script.sh
 # Two Debug builds into a work folder; leaves nothing in the repository.
@@ -67,10 +67,11 @@ else
 fi
 
 APP2=$WORK/dd-own/Build/Products/Debug/LUFSBar.app
-if [[ -f $APP2/Contents/Resources/COPYING ]] && grep -q "Permission is hereby granted" $APP2/Contents/Resources/COPYING; then
-    result PASS "4 the app carries libebur128's licence"
+if [[ -f $APP2/Contents/Resources/COPYING ]] && grep -q "Permission is hereby granted" $APP2/Contents/Resources/COPYING \
+    && grep -q "The Regents of the University of California" $APP2/Contents/Resources/COPYING-queue.h 2>/dev/null; then
+    result PASS "4 the app carries the licences of libebur128 and its queue.h"
 else
-    result FAIL "4 the app does not carry libebur128's licence (Contents/Resources/COPYING)"
+    result FAIL "4 the app does not carry the licences (Contents/Resources/COPYING, COPYING-queue.h)"
 fi
 
 exit $FAILED

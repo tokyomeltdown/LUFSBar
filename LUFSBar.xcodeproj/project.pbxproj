@@ -17,6 +17,7 @@
 		6357354B98F64D938BE54F25 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231300554E7D4A3EAFE6F8D2 /* SettingsView.swift */; };
 		B6EED5FB73524B088FE0BB81 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0AFAC7794FF84F01A5F0F54C /* Assets.xcassets */; };
 		7C0A2E4B91D84F3A8E5B6C01 /* COPYING in Resources */ = {isa = PBXBuildFile; fileRef = 32A6D9AFB7B4473B8F3E7042 /* COPYING */; };
+		9A3F6E21C84B4D7FA1E2B803 /* COPYING-queue.h in Resources */ = {isa = PBXBuildFile; fileRef = 4E1B7C9D2A6F48E3B0D5C702 /* COPYING-queue.h */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		B5E3AA65F9904DBC8CBD7882 /* ebur128.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ebur128.h; sourceTree = "<group>"; };
 		B8DDBCFC37C14AC2BF635891 /* queue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "queue/sys/queue.h"; sourceTree = "<group>"; };
 		32A6D9AFB7B4473B8F3E7042 /* COPYING */ = {isa = PBXFileReference; lastKnownFileType = text; path = COPYING; sourceTree = "<group>"; };
+		4E1B7C9D2A6F48E3B0D5C702 /* COPYING-queue.h */ = {isa = PBXFileReference; lastKnownFileType = text; path = "queue/COPYING-queue.h"; sourceTree = "<group>"; };
 		6257FAAFA8F14C8E9F87B30C /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
 		F5A8ECB9786748FDA9AB0B81 /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
 		231300554E7D4A3EAFE6F8D2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -83,6 +85,7 @@
 				B5E3AA65F9904DBC8CBD7882 /* ebur128.h */,
 				B8DDBCFC37C14AC2BF635891 /* queue.h */,
 				32A6D9AFB7B4473B8F3E7042 /* COPYING */,
+				4E1B7C9D2A6F48E3B0D5C702 /* COPYING-queue.h */,
 			);
 			path = libebur128;
 			sourceTree = "<group>";
@@ -155,6 +158,7 @@
 			files = (
 				B6EED5FB73524B088FE0BB81 /* Assets.xcassets in Resources */,
 				7C0A2E4B91D84F3A8E5B6C01 /* COPYING in Resources */,
+				9A3F6E21C84B4D7FA1E2B803 /* COPYING-queue.h in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

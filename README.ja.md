@@ -59,7 +59,7 @@ Xcode 16以降が必要です。作者の署名証明書がない環境では `b
 
 ## ライセンス
 
-MIT — [LICENSE](LICENSE) 参照。同梱の [libebur128](https://github.com/jiixyj/libebur128) もMITライセンスです。
+MIT — [LICENSE](LICENSE) 参照。同梱の [libebur128](https://github.com/jiixyj/libebur128) もMITライセンスで、一緒にビルドしている `queue.h` は3条項BSDライセンスです（アプリに両方の表示を同梱しています）。
 
 ---
 

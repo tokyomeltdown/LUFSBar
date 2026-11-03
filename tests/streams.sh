@@ -6,6 +6,7 @@
 #      [2, n]) with the stereo pair inside the second stream (3-4): -18.0
 #   2  the same with the stereo pair across the two streams (2-3): -18.0
 #      (before the fix only stream 0 was tapped, and the tone read -21.0)
+#   4  the same with the left side in the later stream (3-2): -18.0
 #   3  a Multi-Output Device of the two as the default output: -18.0
 #
 # Usage: streams.sh <LUFSBar.app> <tone.wav> "<2-channel device>" "<multichannel device>"
@@ -87,10 +88,17 @@ check() {
 }
 
 make_device 0 LUFSBarTestAggregate
+# Cases 1, 2 and 4 need a 2-channel first stream and a second one of 4 or more.
+LAYOUT=$("$BIN/stereo_channels" "$DEVICE" | grep -o "streams=.*")
+[[ $LAYOUT =~ '^streams=\[2, ([4-9]|[1-9][0-9])\]$' ]] || { print "cannot test: the aggregate's streams are $LAYOUT"; exit 2; }
 "$BIN/stereo_channels" "$DEVICE" 3 4 >/dev/null || { print "cannot test: cannot set the stereo pair"; exit 2; }
 check 1 "stereo pair inside the second stream (3-4)" $(measure)
 "$BIN/stereo_channels" "$DEVICE" 2 3 >/dev/null || { print "cannot test: cannot set the stereo pair"; exit 2; }
 check 2 "stereo pair across two streams (2-3)" $(measure)
+# Left in the later stream: the only layout where the order the taps are listed
+# in and the order of the device's streams disagree.
+"$BIN/stereo_channels" "$DEVICE" 3 2 >/dev/null || { print "cannot test: cannot set the stereo pair"; exit 2; }
+check 4 "stereo pair across two streams, left in the later one (3-2)" $(measure)
 
 make_device 1 LUFSBarTestMultiOutput
 check 3 "Multi-Output Device" $(measure)

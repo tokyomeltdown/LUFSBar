@@ -59,7 +59,7 @@ Requires Xcode 16+. Without the author's signing certificate, `build.sh` signs t
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled [libebur128](https://github.com/jiixyj/libebur128) is also MIT licensed.
+MIT — see [LICENSE](LICENSE). Bundled [libebur128](https://github.com/jiixyj/libebur128) is also MIT licensed, and the `queue.h` it builds with is under the 3-clause BSD licence (the app carries both notices).
 
 ---
 
