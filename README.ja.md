@@ -1,6 +1,6 @@
 # LUFSBar
 
-**Macで鳴る全ての音に、物差しを。**
+**Macのサウンド出力に、物差しを。**
 
 LUFSBarは、macOSのメニューバーに常駐する無料・オープンソースのラウドネスメーターです。Apple Music、Spotify、YouTube、DAWの出力——Macのサウンド出力から鳴る音すべてをリアルタイムに計測します。BlackHoleもLoopbackも仮想オーディオデバイスの設定も不要です。
 

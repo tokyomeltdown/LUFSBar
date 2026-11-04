@@ -3,252 +3,473 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LUFSBar — Every sound on your Mac, measured.</title>
-<meta name="description" content="LUFSBar is a free, open-source LUFS loudness meter for the macOS menu bar. Measures Apple Music, Spotify, YouTube and your DAW in real time — no BlackHole, no virtual audio devices.">
-<meta property="og:title" content="LUFSBar — Every sound on your Mac, measured.">
-<meta property="og:description" content="Free, open-source LUFS loudness meter for the macOS menu bar.">
+<title>LUFSBar — Your Mac's sound output, measured</title>
+<meta name="description" content="A free, open-source LUFS meter for the macOS menu bar. Momentary, Short-term, Integrated and True Peak for the audio going to your Mac's sound output. No virtual audio device. macOS 14.4+.">
+<meta name="theme-color" content="#ffffff">
+<link rel="canonical" href="https://tokyomeltdown.github.io/LUFSBar/">
+<meta name="robots" content="index,follow">
 <meta property="og:type" content="website">
+<meta property="og:title" content="LUFSBar — Your Mac's sound output, measured">
+<meta property="og:description" content="Free and open source. M, S, I and True Peak in your menu bar, for what goes to your Mac's sound output.">
 <meta property="og:url" content="https://tokyomeltdown.github.io/LUFSBar/">
 <meta property="og:image" content="https://tokyomeltdown.github.io/LUFSBar/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="LUFSBar — Macで鳴る全ての音に、物差しを。">
+<meta property="og:image:alt" content="LUFSBar">
+<meta property="og:site_name" content="tokyomeltdown">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="LUFSBar — Every sound on your Mac, measured.">
-<meta name="twitter:description" content="Free, open-source LUFS loudness meter for the macOS menu bar.">
+<meta name="twitter:title" content="LUFSBar — Your Mac's sound output, measured">
+<meta name="twitter:description" content="Free and open source. M, S, I and True Peak in your menu bar, for what goes to your Mac's sound output.">
 <meta name="twitter:image" content="https://tokyomeltdown.github.io/LUFSBar/og-image.png">
-<meta name="theme-color" content="#f5f5f7">
 <link rel="icon" href="icon.png">
 <style>
-:root{--bg:#ffffff;--bg2:#f5f5f7;--text:#1d1d1f;--muted:#6e6e73;--blue:#0071e3;--card:#f5f5f7;--dark:#0b0b0f;--darkcard:#16161c;--accent:#5eead4;}
-*{margin:0;padding:0;box-sizing:border-box;}
-html{scroll-behavior:smooth;}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Hiragino Sans","Noto Sans JP",sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;}
-a{color:var(--blue);text-decoration:none;}
-.wrap{max-width:1024px;margin:0 auto;padding:0 24px;}
-nav{position:sticky;top:0;z-index:50;backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);background:rgba(255,255,255,.72);border-bottom:1px solid rgba(0,0,0,.08);}
-nav .inner{max-width:1024px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;}
-nav .brand{display:flex;align-items:center;gap:9px;font-weight:600;color:var(--text);font-size:16px;letter-spacing:-.01em;}
-nav .brand img{width:24px;height:24px;border-radius:6px;}
-nav .right{display:flex;align-items:center;gap:12px;}
-.langbtn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:4px 6px;border-radius:6px;}
-.langbtn.active{color:var(--text);font-weight:600;}
-.pill{display:inline-block;background:var(--blue);color:#fff;font-weight:500;padding:8px 20px;border-radius:980px;font-size:14px;transition:background .2s;}
-.pill:hover{background:#0077ed;}
-.pill.big{padding:14px 32px;font-size:17px;}
-.pill.ghost{background:transparent;color:var(--blue);border:1px solid var(--blue);}
-.pill.ghost:hover{background:var(--blue);color:#fff;}
-.hero{text-align:center;padding:110px 24px 80px;}
-.hero img{width:104px;height:104px;border-radius:24px;margin-bottom:32px;box-shadow:0 20px 50px rgba(0,0,0,.12);}
-.eyebrow{font-size:15px;font-weight:600;color:var(--muted);letter-spacing:.01em;margin-bottom:14px;}
-h1{font-size:clamp(40px,7vw,72px);line-height:1.05;font-weight:700;letter-spacing:-.025em;}
-h1 .grad{background:linear-gradient(90deg,#0ea5e9,#34d399);-webkit-background-clip:text;background-clip:text;color:transparent;}
-.hero p.sub{color:var(--muted);font-size:clamp(18px,2.4vw,22px);max-width:620px;margin:24px auto 36px;font-weight:400;letter-spacing:-.01em;}
-.cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;align-items:center;}
-.meta{color:var(--muted);font-size:12px;margin-top:22px;letter-spacing:.01em;}
-.menubar-demo{margin:64px auto 0;max-width:460px;background:rgba(22,22,28,.92);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px 18px;display:flex;justify-content:flex-end;align-items:center;gap:16px;font-size:14px;color:#9ca3af;box-shadow:0 30px 60px rgba(0,0,0,.18);}
-.menubar-demo .val{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent);font-size:15px;}
-section{padding:90px 0;}
-.sec-head{text-align:center;max-width:680px;margin:0 auto 56px;}
-h2{font-size:clamp(28px,4.5vw,44px);font-weight:700;letter-spacing:-.02em;line-height:1.15;}
-.sec-head p{color:var(--muted);font-size:18px;margin-top:16px;}
-.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;}
-.bcard{background:var(--card);border-radius:24px;padding:34px 30px;grid-column:span 3;transition:transform .3s ease;}
-.bcard:hover{transform:translateY(-3px);}
-.bcard.wide{grid-column:span 6;}
-.bcard.third{grid-column:span 2;}
-.bcard.dark{background:var(--dark);color:#f5f5f7;}
-.bcard.dark p{color:#a1a1aa;}
-.bcard .k{font-size:13px;font-weight:600;color:var(--blue);letter-spacing:.02em;text-transform:uppercase;margin-bottom:12px;}
-.bcard.dark .k{color:var(--accent);}
-.bcard h3{font-size:22px;font-weight:600;letter-spacing:-.015em;margin-bottom:10px;line-height:1.25;}
-.bcard p{color:var(--muted);font-size:15px;}
-.forecast{margin-top:24px;background:#0b0b0f;border-radius:16px;padding:20px 24px;max-width:340px;font-family:ui-monospace,Menlo,monospace;font-size:14px;color:#e5e7eb;}
-.forecast .row{display:flex;justify-content:space-between;padding:5px 0;}
-.forecast .row span:last-child{color:#fbbf24;}
-.forecast .row.ok span:last-child{color:#34d399;}
-.darksec{background:var(--dark);color:#f5f5f7;}
-.darksec h2{color:#f5f5f7;}
-.darksec .sec-head p{color:#a1a1aa;}
-.darksec .bcard{background:var(--darkcard);}
-.darksec .bcard h3{color:#f5f5f7;}
-.darksec .bcard p{color:#a1a1aa;}
-.darksec .note{max-width:680px;margin:44px auto 0;text-align:center;color:#a1a1aa;font-size:14px;}
-.finale{text-align:center;padding:120px 24px;}
-footer{background:var(--bg2);padding:40px 0 60px;color:var(--muted);font-size:13px;}
-footer .links{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:20px;}
-footer a{color:var(--muted);}
-footer a:hover{color:var(--text);}
-.reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease;}
-.reveal.on{opacity:1;transform:none;}
-.lang-ja{display:none;}
-body.ja .lang-ja{display:block;}
-body.ja .lang-en{display:none;}
-span.lang-ja,a.lang-ja{display:none;}
-body.ja span.lang-ja,body.ja a.lang-ja{display:inline;}
-body.ja span.lang-en,body.ja a.lang-en{display:none;}
-@media(max-width:720px){.bcard,.bcard.third{grid-column:span 6;}}
+/* The same family as the hub, EQ Mirror, LUFSBar Pro and VOX Normalizer: hairline
+   grid, small spaced-out mono labels, plain buttons, one accent. White from top
+   to bottom, the opposite of LUFSBar Pro; the accent is the indigo of the icon. */
+:root{
+  --bg:#ffffff; --ink:#1d1d1f; --sub:#515154; --muted:#6e6e73; --line:rgba(29,29,31,.13); --grid:rgba(29,29,31,.04);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  /* The popover: macOS's light material and its system colours */
+  --p-ink:#1d1d1f; --p-sub:rgba(60,60,67,.66); --p-hair:rgba(60,60,67,.16); --p-btn:rgba(60,60,67,.1);
+  --p-green:#1b8f3a; --p-red:#d0302a; --p-orange:#b85f00;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{background:var(--bg);color:var(--ink);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased;overflow-x:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Hiragino Sans","Noto Sans JP",sans-serif;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:48px 48px;background-position:-1px -1px}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+
+/* Every string is present twice; one class on <body> picks the language. */
+.en,.ja{display:none}
+body.lang-en .en{display:initial} body.lang-ja .ja{display:initial}
+/* Break Japanese at phrase boundaries where the browser can (Chrome, Edge) */
+body.lang-ja{word-break:auto-phrase}
+.nw{white-space:nowrap}
+
+.k{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+
+/* ---------------- top bar ---------------- */
+.top{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.86);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:0 1px 0 var(--line)}
+.top .inner{max-width:1040px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;font-size:15px;letter-spacing:-.01em}
+.brand img{width:22px;height:22px;border-radius:5px}
+.brand b{font-weight:700}
+.right{display:flex;align-items:center;gap:12px}
+.lang{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.lang button{background:none;border:0;color:var(--muted);font:inherit;font-size:12px;padding:5px 11px;cursor:pointer}
+.lang button.on{background:var(--ink);color:var(--bg);font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;font-weight:600;font-size:14px;padding:10px 20px;white-space:nowrap;transition:background .3s,box-shadow .3s}
+.btn.solid{background:var(--ink);color:var(--bg)}
+.btn.solid:hover{box-shadow:0 12px 36px -10px rgba(74,63,140,.5)}
+.btn.ghost{border:1px solid rgba(29,29,31,.28);color:var(--ink)}
+.btn.ghost:hover{background:rgba(29,29,31,.06)}
+.btn.big{font-size:16px;padding:14px 26px}
+
+/* ---------------- hero ---------------- */
+.hero{padding:96px 0 40px}
+.hero h1{font-size:clamp(34px,6.2vw,68px);line-height:1.04;font-weight:700;letter-spacing:-.03em;margin:18px 0 20px;max-width:14ch}
+body.lang-ja .hero h1{max-width:none;font-size:clamp(28px,5.4vw,56px);line-height:1.18;letter-spacing:-.01em}
+.hero p.lede{color:var(--sub);font-size:clamp(17px,2vw,20px);max-width:34em}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
+.fine{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--muted);margin-top:16px}
+
+/* ---------------- the demo: a menu bar, the reading, the popover ---------------- */
+.demo{margin:56px 0 0}
+.screen{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  background:radial-gradient(120% 140% at 50% 0%,#ffffff 0%,#f4f5f8 60%,#eceef2 100%)}
+.menubar{position:relative;z-index:3;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:rgba(29,29,31,.05);font-size:12px;color:#3a3f45}
+.menubar .apps span{margin-right:16px}
+.menubar .apps span:first-child{font-weight:700}
+.menubar .status{display:flex;align-items:center;gap:6px}
+.menubar .clock{font-family:var(--mono);font-size:11px;color:#5c636b;padding-left:8px}
+.item{background:none;border:0;color:#1d1d1f;font-family:var(--mono);font-size:13px;line-height:22px;padding:0 7px;border-radius:5px;cursor:pointer;white-space:pre}
+.item:hover,.item.lit{background:rgba(29,29,31,.1)}
+.item:focus-visible{outline:2px solid #2b6fd6;outline-offset:1px}
+
+/* The app's popover: 260 wide, 16 of padding, with its arrow under the reading. */
+.pop{position:absolute;top:38px;left:0;z-index:4;width:260px;padding:16px;display:flex;flex-direction:column;gap:10px;color:var(--p-ink);font-size:13px;line-height:1.3;
+  background:rgba(252,252,254,.96);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);border-radius:16px;
+  box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 20px 50px -14px rgba(0,0,0,.3);
+  opacity:0;visibility:hidden;transform:translateY(-4px);transition:opacity .16s,transform .16s var(--ease),visibility 0s .16s}
+.pop.open{opacity:1;visibility:visible;transform:none;transition:opacity .16s,transform .16s var(--ease)}
+.pop::before{content:"";position:absolute;top:-8px;left:var(--arrow,50%);width:20px;height:8px;margin-left:-10px;background:inherit;clip-path:polygon(50% 0,100% 100%,0 100%)}
+.phead{display:flex;align-items:center;justify-content:space-between}
+.phead b{font-weight:700}
+.phead span{display:flex;gap:9px;color:#3a3a3c}
+.phead svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}
+.pop hr{border:0;border-top:1px solid var(--p-hair)}
+.rows{display:grid;grid-template-columns:auto auto;justify-content:start;gap:6px 16px}
+.rows dt{color:var(--p-sub);line-height:18px}
+.rows dd{font-family:var(--mono);line-height:18px;white-space:pre;text-align:right}
+.rows dd small{font-size:11px;line-height:0;margin-left:6px}
+.up{color:var(--p-green)} .down{color:var(--p-red)}
+.pbtns{display:flex;gap:8px}
+.pbtn{background:var(--p-btn);border:0;border-radius:6px;color:var(--p-ink);font:inherit;padding:4px 10px;cursor:pointer}
+.pbtn:hover{background:rgba(60,60,67,.17)}
+.pbtn:focus-visible{outline:2px solid #2b6fd6;outline-offset:1px}
+.fc{font-size:10.5px;letter-spacing:-.01em;white-space:nowrap;color:var(--p-sub)}
+.rows.forecast{gap:4px 16px}
+.rows.forecast dd{font-size:11px;color:var(--p-sub)}
+.rows.forecast dd.over{color:var(--p-orange)} .rows.forecast dd.okay{color:var(--p-green)}
+
+/* The right-click menu */
+.menu{position:absolute;top:34px;left:0;z-index:5;min-width:226px;padding:5px;border-radius:11px;color:var(--p-ink);font-size:13px;
+  background:rgba(252,252,254,.96);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 16px 40px -12px rgba(0,0,0,.3)}
+.menu[hidden]{display:none}
+.menu button{display:flex;gap:6px;width:100%;background:none;border:0;color:inherit;font:inherit;text-align:left;padding:3px 9px 3px 6px;border-radius:6px;cursor:pointer}
+.menu button::before{content:"";width:14px;text-align:center;font-weight:600}
+.menu button[aria-checked=true]::before{content:"\2713"}
+.menu button:hover,.menu button:focus-visible{background:#2b6fd6;color:#fff;outline:0}
+.menu hr{border:0;border-top:1px solid var(--p-hair);margin:5px 8px}
+
+.demo .say{display:flex;justify-content:flex-end;margin-top:14px}
+
+/* ---------------- three things ---------------- */
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:96px}
+.three>div{padding:28px 24px 30px 0}
+.three>div+div{padding-left:24px;border-left:1px solid var(--line)}
+.three h3{font-size:19px;font-weight:600;letter-spacing:-.01em;margin:12px 0 8px}
+.three p{color:var(--sub);font-size:14.5px}
+
+/* ---------------- free ---------------- */
+.buy{padding:96px 0 0;display:grid;grid-template-columns:1.1fr 1fr;gap:40px;align-items:end}
+.buy .price{font-size:clamp(56px,8vw,88px);font-weight:700;letter-spacing:-.04em;line-height:1;margin-top:14px}
+.buy ul{list-style:none;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:16px;font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--sub)}
+.buy .side p{color:var(--sub);font-size:15px;margin-bottom:22px}
+
+/* ---------------- spec ---------------- */
+.spec{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:72px}
+.spec>div{padding:24px 20px 26px 0}
+.spec>div+div{padding-left:20px;border-left:1px solid var(--line)}
+.spec .v{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:10px 0 6px}
+.spec p{color:var(--muted);font-size:13.5px}
+
+.more{margin:56px 0 0;color:var(--sub);font-size:15px}
+.more a{border-bottom:1px solid rgba(29,29,31,.35)}
+.more a:hover{border-color:var(--ink)}
+
+footer{margin-top:96px;border-top:1px solid var(--line);padding:30px 0 56px;color:var(--muted);font-size:12.5px;background:rgba(255,255,255,.9)}
+footer .links{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:14px}
+footer a:hover{color:var(--ink)}
+
+@media(max-width:820px){
+  .three,.spec{grid-template-columns:1fr}
+  .three>div,.three>div+div,.spec>div,.spec>div+div{padding:22px 0;border-left:0}
+  .three>div+div,.spec>div+div{border-top:1px solid var(--line)}
+  .buy{grid-template-columns:1fr;gap:12px}
+  .hero{padding-top:64px}
+}
+@media(max-width:560px){
+  .menubar .apps,.menubar .clock{display:none}
+  .menubar{justify-content:flex-end}
+  .brand span{display:none}
+  .top .inner{padding:10px 16px}
+  .wrap{padding:0 16px}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
-<body>
-<nav>
-  <div class="inner">
-    <div class="brand"><img src="icon.png" alt=""><span>LUFSBar</span></div>
-    <div class="right">
-      <button class="langbtn" id="btn-en" onclick="setLang('en')">EN</button>
-      <button class="langbtn" id="btn-ja" onclick="setLang('ja')">JA</button>
-      <a class="pill dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download</span><span class="lang-ja">ダウンロード</span></a>
-    </div>
-  </div>
-</nav>
+<body class="lang-en">
 
-<header class="hero">
-  <img src="icon.png" alt="LUFSBar icon">
-  <div class="lang-en">
-    <p class="eyebrow">LUFSBar for macOS</p>
-    <h1>Every sound on your Mac,<br><span class="grad">measured.</span></h1>
-    <p class="sub">A free LUFS loudness meter that lives in your menu bar. Apple Music, Spotify, YouTube, your DAW — in real time. No BlackHole. No virtual audio devices.</p>
+<header class="top"><div class="inner">
+  <a class="brand" href="./"><img src="icon.png" alt=""><span><b>LUFSBar</b></span></a>
+  <div class="right">
+    <div class="lang"><button id="btn-en" class="on" aria-pressed="true">EN</button><button id="btn-ja" aria-pressed="false">日本語</button></div>
+    <a class="btn solid dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="en">Download</span><span class="ja">ダウンロード</span></a>
   </div>
-  <div class="lang-ja">
-    <p class="eyebrow">LUFSBar for macOS</p>
-    <h1>Macで鳴る全ての音に、<br><span class="grad">物差しを。</span></h1>
-    <p class="sub">メニューバーに常駐する無料のLUFSメーター。Apple Music、Spotify、YouTube、DAWの出力をリアルタイム計測。BlackHoleも仮想オーディオデバイスも不要。</p>
-  </div>
-  <div class="cta">
-    <a class="pill big dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download for Mac</span><span class="lang-ja">Macにダウンロード</span></a>
-    <a class="pill big ghost" href="https://github.com/tokyomeltdown/LUFSBar" target="_blank" rel="noopener">GitHub</a>
-  </div>
-  <p class="meta">macOS 14.4+ · Apple silicon &amp; Intel · Signed &amp; notarized · Free &amp; open source (MIT)</p>
-  <div class="menubar-demo"><span class="val">-14.6 LUFS</span><span>◐</span><span>⌁</span><span>100%</span></div>
-</header>
+</div></header>
 
-<section>
- <div class="wrap">
-  <div class="sec-head reveal">
-    <div class="lang-en">
-      <h2>The loudness of everything.<br>At a glance.</h2>
-      <p>Every sound your Mac plays passes through one mix — but nobody is watching it. LUFSBar taps the system audio and puts the numbers where you can always see them.</p>
-    </div>
-    <div class="lang-ja">
-      <h2>すべての音のラウドネスを。<br>ひと目で。</h2>
-      <p>Macで再生される音はすべて1つのミックスを通っているのに、誰もそれを見ていません。LUFSBarはシステム音声を直接計測し、いつでも見える場所に数値を置きます。</p>
-    </div>
-  </div>
-  <div class="bento">
-    <div class="bcard reveal">
-      <div class="k"><span class="lang-en">Mix engineers</span><span class="lang-ja">ミックスエンジニア</span></div>
-      <h3><span class="lang-en">Check references without leaving your DAW</span><span class="lang-ja">DAWから出ずにリファレンス確認</span></h3>
-      <p><span class="lang-en">Play a reference on any streaming service and read its loudness instantly — no bouncing, no importing.</span><span class="lang-ja">配信サービスでリファレンス曲を再生するだけでラウドネスが読める。バウンスも読み込みも不要。</span></p>
-    </div>
-    <div class="bcard reveal">
-      <div class="k"><span class="lang-en">Reference snapshot</span><span class="lang-ja">リファレンス保存</span></div>
-      <h3><span class="lang-en">Save it. Then compare your mix.</span><span class="lang-ja">保存して、自分のミックスと比較。</span></h3>
-      <p><span class="lang-en">One click captures the reference's LUFS &amp; True Peak. Your mix's delta is shown live.</span><span class="lang-ja">ワンクリックでリファレンスのLUFSとTrue Peakを保存。差分をライブ表示。</span></p>
-    </div>
-    <div class="bcard wide dark reveal" style="display:flex;flex-wrap:wrap;gap:30px;align-items:center;justify-content:space-between;">
-      <div style="flex:1;min-width:260px;">
-        <div class="k"><span class="lang-en">Streaming forecast</span><span class="lang-ja">配信ノーマライズ予測</span></div>
-        <h3><span class="lang-en">Know your turn-down before you upload.</span><span class="lang-ja">アップ前に「何dB下げられるか」。</span></h3>
-        <p><span class="lang-en">See exactly how much Apple Music, Spotify and YouTube will normalize your track — while it plays.</span><span class="lang-ja">Apple Music・Spotify・YouTubeでどれだけ音量調整されるかを、再生しながら確認。</span></p>
-      </div>
-      <div class="forecast" style="margin-top:0;">
-        <div class="row"><span>Apple Music</span><span>-1.4 dB</span></div>
-        <div class="row ok"><span>Spotify</span><span>OK</span></div>
-        <div class="row ok"><span>YouTube</span><span>OK</span></div>
-      </div>
-    </div>
-    <div class="bcard reveal">
-      <div class="k"><span class="lang-en">Podcasters &amp; streamers</span><span class="lang-ja">配信者・ポッドキャスター</span></div>
-      <h3><span class="lang-en">Hit your loudness target</span><span class="lang-ja">ラウドネス基準を外さない</span></h3>
-      <p><span class="lang-en">Keep your program at a consistent, platform-ready loudness while you work.</span><span class="lang-ja">作業しながら、番組のラウドネスをプラットフォーム基準にキープ。</span></p>
-    </div>
-    <div class="bcard reveal">
-      <div class="k"><span class="lang-en">Pro metering</span><span class="lang-ja">プロ仕様の計測</span></div>
-      <h3><span class="lang-en">M / S / I LUFS + True Peak</span><span class="lang-ja">M / S / I LUFS + True Peak</span></h3>
-      <p><span class="lang-en">ITU-R BS.1770-4 / EBU R128 compliant: K-weighting, gating, 4× oversampled True Peak.</span><span class="lang-ja">ITU-R BS.1770-4 / EBU R128準拠。K特性・ゲーティング・4倍オーバーサンプリングTrue Peak。</span></p>
-    </div>
-  </div>
- </div>
-</section>
+<main class="wrap">
 
-<section class="darksec">
- <div class="wrap">
-  <div class="sec-head reveal">
-    <div class="lang-en">
-      <h2>Transparent by design.</h2>
-      <p>LUFSBar is a small app that does one thing. You can verify everything it does.</p>
-    </div>
-    <div class="lang-ja">
-      <h2>設計から、透明。</h2>
-      <p>LUFSBarは1つのことだけをする小さなアプリです。その挙動はすべて検証できます。</p>
-    </div>
-  </div>
-  <div class="bento">
-    <div class="bcard third reveal">
-      <h3><span class="lang-en">No network. No telemetry.</span><span class="lang-ja">通信なし。テレメトリなし。</span></h3>
-      <p><span class="lang-en">Audio is analyzed in memory and never recorded to disk. No accounts, no tracking.</span><span class="lang-ja">音声はメモリ上で解析されるだけで、録音・保存は一切しません。</span></p>
-    </div>
-    <div class="bcard third reveal">
-      <h3><span class="lang-en">One permission only</span><span class="lang-ja">求める許可は1つだけ</span></h3>
-      <p><span class="lang-en">macOS asks once for System Audio Recording. That's all LUFSBar needs.</span><span class="lang-ja">初回に一度だけ「システムオーディオ録音」の許可を求めます。必要なのはそれだけ。</span></p>
-    </div>
-    <div class="bcard third reveal">
-      <h3><span class="lang-en">100% open source</span><span class="lang-ja">完全オープンソース</span></h3>
-      <p><span class="lang-en">MIT licensed. Read the source, build it yourself, or file an issue.</span><span class="lang-ja">MITライセンス。ソースを読むのも、自分でビルドするのも自由。</span></p>
-    </div>
-  </div>
-  <p class="note reveal">
-    <span class="lang-en">LUFSBar registers as a login item on first launch so your meter is always there. Turn it off anytime — it will never re-enable itself.</span>
-    <span class="lang-ja">初回起動時にログイン項目へ登録されます（メーターを常に使えるように）。いつでもオフにでき、勝手にオンへ戻すことはありません。</span>
+<section class="hero">
+  <div class="k"><span class="en">LUFSBar · for macOS</span><span class="ja">LUFSBar · macOS</span></div>
+  <h1><span class="en">Your Mac's sound output, measured.</span><span class="ja">Mac のサウンド出力に、<br>物差しを。</span></h1>
+  <p class="lede">
+    <span class="en">A free LUFS meter in your menu bar. Music, video or your DAW: if it goes to your Mac's sound output, it's measured, with no virtual audio device.</span>
+    <span class="ja">メニューバーに置く、無料の LUFS メーター。音楽も動画も DAW も、Mac のサウンド出力に向かう音なら、仮想オーディオデバイスなしで測れます。</span>
   </p>
- </div>
+  <div class="cta">
+    <a class="btn solid big dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="en">Download — free</span><span class="ja">無料でダウンロード</span></a>
+    <a class="btn ghost big" href="https://github.com/tokyomeltdown/LUFSBar" target="_blank" rel="noopener">GitHub</a>
+  </div>
+  <p class="fine"><span class="nw">macOS 14.4+</span> · <span class="nw">Apple silicon &amp; Intel</span> · <span class="nw"><span class="en">Signed &amp; notarized</span><span class="ja">署名・公証済み</span></span></p>
+
+  <!-- A drawing of the app rather than a screenshot: sharp at any size, and it
+       behaves like the app where it counts. The reading opens and closes the
+       popover, a right-click opens the metric menu, and Save Reference works as
+       it does in the app. -->
+  <div class="demo">
+    <div class="screen" id="screen">
+      <div class="menubar">
+        <div class="apps" aria-hidden="true"><span>Music</span><span>File</span><span>Edit</span></div>
+        <div class="status"><button class="item" id="item" aria-expanded="false" aria-controls="pop" aria-haspopup="dialog"></button><span class="clock" aria-hidden="true">Wed 4 Nov 9:41</span></div>
+      </div>
+
+      <div class="pop" id="pop" role="dialog" aria-label="LUFSBar">
+        <div class="phead"><b>LUFSBar</b><span aria-hidden="true">
+          <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4"/></svg>
+          <svg viewBox="0 0 16 16"><path d="M8 2v6"/><path d="M4.4 4.2a5.2 5.2 0 1 0 7.2 0"/></svg>
+        </span></div>
+        <hr>
+        <dl class="rows">
+          <dt>Momentary</dt><dd id="vM"></dd>
+          <dt>Short-term</dt><dd id="vS"></dd>
+          <dt>Integrated</dt><dd id="vI"></dd>
+          <dt>True Peak</dt><dd id="vT"></dd>
+        </dl>
+        <hr>
+        <div class="pbtns"><button class="pbtn" id="save">Save Reference</button><button class="pbtn" id="clear" hidden>Clear</button></div>
+        <hr>
+        <div class="fc">Streaming Normalization Forecast (Integrated)</div>
+        <dl class="rows forecast">
+          <dt>Apple Music</dt><dd id="f0"></dd>
+          <dt>Spotify</dt><dd id="f1"></dd>
+          <dt>YouTube</dt><dd id="f2"></dd>
+        </dl>
+      </div>
+
+      <div class="menu" id="menu" role="menu" hidden>
+        <button role="menuitemradio" data-m="M" aria-checked="false">Momentary</button>
+        <button role="menuitemradio" data-m="S" aria-checked="true">Short-term</button>
+        <button role="menuitemradio" data-m="I" aria-checked="false">Integrated</button>
+        <hr>
+        <button role="menuitemcheckbox" id="compact" aria-checked="false">Compact menu bar display</button>
+      </div>
+    </div>
+    <div class="say"><span class="k"><span class="en">A drawing of the app</span><span class="ja">画面はイメージです</span></span></div>
+  </div>
 </section>
 
-<section class="finale">
-  <div class="lang-en"><h2>Put a meter where<br>you'll actually see it.</h2></div>
-  <div class="lang-ja"><h2>いつも見える場所に、<br>メーターを。</h2></div>
-  <div class="cta" style="margin-top:34px;">
-    <a class="pill big dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="lang-en">Download for Mac — Free</span><span class="lang-ja">無料でダウンロード</span></a>
-    <a class="pill big ghost" href="https://tokyomeltdown.github.io/lufsbar-pro/">LUFSBar Pro</a>
+<section class="three">
+  <div>
+    <div class="k">01 · <span class="en">Menu bar</span><span class="ja">メニューバー</span></div>
+    <h3><span class="en">In your menu bar.</span><span class="ja">メニューバーに。</span></h3>
+    <p><span class="en">Momentary, Short-term or Integrated, whichever you choose. Click it for all four readings.</span><span class="ja">Momentary・Short-term・Integrated から選んで表示します。クリックすると4つの値がすべて見られます。</span></p>
   </div>
-  <p class="meta">LUFSBar.pkg · Signed &amp; notarized</p>
+  <div>
+    <div class="k">02 · <span class="en">Reference</span><span class="ja">リファレンス</span></div>
+    <h3><span class="en">Against a reference.</span><span class="ja">リファレンスと比べる。</span></h3>
+    <p><span class="en">Save a track's level while it plays, then play your own mix and read the difference. Turn off the player's volume normalization first.</span><span class="ja">曲の再生中に値を保存して自分のミックスを再生すると、差がそのまま出ます。プレーヤーの音量の自動調整は先に切ってください。</span></p>
+  </div>
+  <div>
+    <div class="k">03 · <span class="en">Streaming</span><span class="ja">配信</span></div>
+    <h3><span class="en">Before you upload.</span><span class="ja">配信の前に。</span></h3>
+    <p><span class="en">See how far Apple Music, Spotify and YouTube are likely to turn your track down.</span><span class="ja">Apple Music・Spotify・YouTube でどれだけ音量が下げられそうかが分かります。</span></p>
+  </div>
 </section>
+
+<section class="buy">
+  <div>
+    <div class="k"><span class="en">Open source</span><span class="ja">オープンソース</span></div>
+    <div class="price"><span class="en">Free</span><span class="ja">無料</span></div>
+    <ul>
+      <li>MIT</li>
+      <li><span class="en">No account</span><span class="ja">アカウント不要</span></li>
+      <li><span class="en">Works offline</span><span class="ja">オフラインで動作</span></li>
+      <li><span class="en">Source on GitHub</span><span class="ja">ソースは GitHub</span></li>
+    </ul>
+  </div>
+  <div class="side">
+    <p><span class="en">Read the code, build it yourself, or open an issue.</span><span class="ja">コードを読むのも、自分でビルドするのも、Issue を立てるのも自由です。</span></p>
+    <div class="cta" style="margin-top:0">
+      <a class="btn solid big dl" href="https://github.com/tokyomeltdown/LUFSBar/releases/latest/download/LUFSBar.pkg"><span class="en">Download — free</span><span class="ja">無料でダウンロード</span></a>
+      <a class="btn ghost big" href="https://github.com/tokyomeltdown/LUFSBar" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</section>
+
+<section class="spec">
+  <div>
+    <div class="k"><span class="en">Measures</span><span class="ja">測る音</span></div>
+    <div class="v"><span class="en">Sound output</span><span class="ja">サウンド出力</span></div>
+    <p><span class="en">The stereo pair of the device set in Sound › Output. An app playing to another device isn't measured, so set your Mac's output to the device your DAW uses.</span><span class="ja">「サウンド › 出力」で選んだデバイスのステレオペアを測ります。別のデバイスに出しているアプリの音は測らないので、DAW を測るときは Mac の出力を DAW と同じデバイスにしてください。</span></p>
+  </div>
+  <div>
+    <div class="k"><span class="en">System</span><span class="ja">動作環境</span></div>
+    <div class="v">macOS 14.4+</div>
+    <p><span class="en">Apple silicon &amp; Intel. Signed and notarized. Starts at login; you can turn that off in Settings.</span><span class="ja">Apple silicon・Intel。<span class="nw">署名・公証済み。</span>ログイン時に起動します（設定でオフにできます）。</span></p>
+  </div>
+  <div>
+    <div class="k"><span class="en">Meter</span><span class="ja">計測</span></div>
+    <div class="v">BS.1770-4</div>
+    <p><span class="en">EBU R128, M / S / I and True Peak, with libebur128.</span><span class="ja">EBU R128・M / S / I と True Peak。エンジンは libebur128。</span></p>
+  </div>
+  <div>
+    <div class="k"><span class="en">Privacy</span><span class="ja">プライバシー</span></div>
+    <div class="v"><span class="en">Offline</span><span class="ja">オフライン</span></div>
+    <p><span class="en">No network, no telemetry. Audio is read in memory and never stored. One permission: System Audio Recording.</span><span class="ja">通信もテレメトリもありません。音はメモリ上で読むだけで、保存しません。必要な許可は「システムオーディオ録音」の1つだけです。</span></p>
+  </div>
+</section>
+
+<p class="more"><a href="https://tokyomeltdown.github.io/lufsbar-pro/"><span class="en">See LUFSBar Pro →</span><span class="ja">LUFSBar Pro を見る →</span></a></p>
+
+</main>
 
 <footer>
  <div class="wrap">
   <div class="links">
     <a href="https://github.com/tokyomeltdown/LUFSBar" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/README.md" target="_blank" rel="noopener">README</a>
-    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/README.ja.md" target="_blank" rel="noopener">README（日本語）</a>
+    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/README.md" target="_blank" rel="noopener" class="en">README</a>
+    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/README.ja.md" target="_blank" rel="noopener" class="ja">README</a>
+    <a href="https://github.com/tokyomeltdown/LUFSBar/blob/main/LICENSE" target="_blank" rel="noopener"><span class="en">Licence (MIT)</span><span class="ja">ライセンス（MIT）</span></a>
     <a href="https://tokyomeltdown.github.io/lufsbar-pro/">LUFSBar Pro</a>
     <a href="https://tokyomeltdown.github.io" target="_blank" rel="noopener">tokyomeltdown</a>
     <a href="https://x.com/tokyomeltdownJP" target="_blank" rel="noopener" aria-label="X (@tokyomeltdownJP)"><svg viewBox="0 0 24 24" style="width:14px;height:14px;vertical-align:-2px;fill:currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
   </div>
-  <p>© 2026 tokyomeltdown · MIT License</p>
+  <p>© 2026 tokyomeltdown · <span class="en">Contains libebur128 (MIT). Apple, Mac and macOS are trademarks of Apple Inc. Other names are trademarks of their owners.</span><span class="ja">libebur128（MIT）を同梱。Apple、Mac、macOS は Apple Inc. の商標です。その他の名称は各社の商標です。</span></p>
  </div>
 </footer>
 
 <script>
-function setLang(l){
-  document.body.classList.toggle('ja', l==='ja');
-  document.getElementById('btn-en').classList.toggle('active', l==='en');
-  document.getElementById('btn-ja').classList.toggle('active', l==='ja');
-  try{localStorage.setItem('lufsbar-lang', l);}catch(e){}
-  document.documentElement.lang = l;
-}
 (function(){
+  function $(id){return document.getElementById(id)}
+
+  function setLang(l){
+    document.body.className='lang-'+l;
+    document.documentElement.lang=l;
+    $('btn-en').classList.toggle('on',l==='en'); $('btn-ja').classList.toggle('on',l==='ja');
+    $('btn-en').setAttribute('aria-pressed',String(l==='en')); $('btn-ja').setAttribute('aria-pressed',String(l==='ja'));
+    try{localStorage.setItem('lufsbar-lang',l);}catch(e){}
+  }
+  $('btn-en').onclick=function(){setLang('en')};
+  $('btn-ja').onclick=function(){setLang('ja')};
   var saved=null;
   try{saved=localStorage.getItem('lufsbar-lang');}catch(e){}
-  setLang(saved || ((navigator.language||'').indexOf('ja')===0 ? 'ja' : 'en'));
-  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target);}});},{threshold:.15});
-  document.querySelectorAll('.reveal').forEach(function(el){io.observe(el);});
+  setLang(saved||((navigator.language||'').indexOf('ja')===0?'ja':'en'));
+
+  // ---- The demo ----
+  // A small stand-in for the meter, stepped every 100 ms as the app polls.
+  // Momentary and Short-term are power averages over 0.4 s and 3 s, Integrated
+  // a running one, and True Peak holds; the rest follows MeterState.swift.
+  var calm=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var LUFS=-13.4, PEAK=-1.2;
+  var TARGETS=[-16,-14,-14];    // StreamingTarget.all
+  var FLOOR=-70;                // displayFloor
+  var NBSP='\u00a0';
+
+  var t=0, wobble=0, hist=[], sum=0, n=0, tp=-Infinity;
+  var m=-Infinity, s=-Infinity, ti=-Infinity, shown=-Infinity;
+  var metric='S', compact=false, ref=null;
+
+  function db(e){return e>0?10*Math.log10(e):-Infinity}
+  function mean(a,w){var x=0;for(var i=Math.max(0,a.length-w);i<a.length;i++)x+=a[i];return x/w}
+
+  function step(){
+    t+=0.1;
+    if(!calm) wobble=wobble*0.7+(Math.random()-.5)*0.9;
+    // Quieter and louder passages, slowly, so a saved reference shows a difference.
+    var level=LUFS+(calm?0:2.4*Math.sin(t*0.2)+1.1*Math.sin(t*0.9)+0.6*Math.sin(t*1.7+1)+wobble);
+    var e=Math.pow(10,level/10);
+    sum+=e; n++;
+    tp=Math.max(tp,PEAK-(calm?0:Math.random()*Math.random()*2.5));
+    hist.push(e); if(hist.length>30) hist.shift();
+    m=db(mean(hist,4)); s=db(mean(hist,30)); ti=db(sum/n);
+    // The menu bar's figure is smoothed; the popover's are not.
+    var v=metric==='M'?m:metric==='S'?s:ti;
+    shown=shown>=FLOOR?shown+(v-shown)*0.2:v;
+  }
+
+  function show(v){return v>=FLOOR?v.toFixed(1):'--'}
+  function pad(x){while(x.length<5)x=NBSP+x;return x}
+  function delta(cur,r){return r!==null&&r!==undefined&&isFinite(cur)&&isFinite(r)?cur-r:null}
+  function row(id,value,unit,d){
+    var el=$(id); el.textContent=show(value)+' '+unit;
+    if(d!==null&&d!==undefined){
+      var sm=document.createElement('small');
+      sm.className=d>=0?'up':'down';
+      sm.textContent='('+(d>=0?'+':'')+d.toFixed(1)+')';
+      el.appendChild(sm);
+    }
+  }
+  function draw(){
+    var x=show(shown);
+    $('item').textContent=compact?pad(x):pad(x)+NBSP+'LUFS';
+    row('vM',m,'LUFS');
+    row('vS',s,'LUFS',ref&&delta(s,ref.S));
+    row('vI',ti,'LUFS',ref&&delta(ti,ref.I));
+    row('vT',tp,'dBTP',ref&&delta(tp,ref.T));
+    TARGETS.forEach(function(g,i){
+      var el=$('f'+i), d=delta(ti,g);
+      if(d===null){el.textContent='--';el.className=''}
+      else if(d>0.05){el.textContent='-'+d.toFixed(1)+' dB';el.className='over'}
+      else{el.textContent='OK';el.className='okay'}
+    });
+  }
+
+  // ---- The popover and the menu ----
+  var screen=$('screen'), pop=$('pop'), menu=$('menu'), item=$('item');
+  function size(){
+    var S=screen.getBoundingClientRect(), I=item.getBoundingClientRect();
+    var c=I.left+I.width/2-S.left, W=S.width;
+    var l=Math.max(8,Math.min(W-268,c-130));
+    pop.style.left=l+'px'; pop.style.setProperty('--arrow',(c-l)+'px');
+    menu.style.left=Math.max(8,Math.min(W-menu.offsetWidth-8,I.left-S.left))+'px';
+    // The frame keeps the open height either way, so opening it moves nothing.
+    screen.style.height=(38+pop.offsetHeight+32)+'px';
+  }
+  function setPop(o){
+    pop.classList.toggle('open',o); pop.inert=!o;
+    item.setAttribute('aria-expanded',String(o)); item.classList.toggle('lit',o);
+  }
+  function setMenu(o){
+    menu.hidden=!o;
+    if(o){setPop(false);size();menu.querySelector('button').focus()}
+  }
+  item.onclick=function(){setMenu(false);setPop(!pop.classList.contains('open'))};
+  item.oncontextmenu=function(e){e.preventDefault();setMenu(menu.hidden)};
+  // Transient, as in the app: a click anywhere else closes it.
+  document.addEventListener('mousedown',function(e){
+    if(!pop.contains(e.target)&&!item.contains(e.target)) setPop(false);
+    if(!menu.contains(e.target)&&!item.contains(e.target)) setMenu(false);
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){var was=!menu.hidden||pop.classList.contains('open');setPop(false);setMenu(false);if(was)item.focus()}
+  });
+  menu.addEventListener('keydown',function(e){
+    if(e.key!=='ArrowDown'&&e.key!=='ArrowUp') return;
+    e.preventDefault();
+    var all=[].slice.call(menu.querySelectorAll('button')), at=all.indexOf(document.activeElement);
+    all[(at+(e.key==='ArrowDown'?1:all.length-1))%all.length].focus();
+  });
+  menu.querySelectorAll('[data-m]').forEach(function(b){
+    b.onclick=function(){
+      metric=b.dataset.m; shown=metric==='M'?m:metric==='S'?s:ti;
+      menu.querySelectorAll('[data-m]').forEach(function(x){x.setAttribute('aria-checked',String(x===b))});
+      setMenu(false); item.focus(); draw();
+    };
+  });
+  $('compact').onclick=function(){
+    compact=!compact; this.setAttribute('aria-checked',String(compact));
+    setMenu(false); item.focus(); draw(); size();
+  };
+  $('save').onclick=function(){
+    ref={S:s,I:ti,T:tp};
+    this.textContent='Update Reference'; $('clear').hidden=false; draw(); size();
+  };
+  $('clear').onclick=function(){
+    ref=null;
+    $('save').textContent='Save Reference'; this.hidden=true; $('save').focus(); draw(); size();
+  };
+
+  pop.inert=true;
+  for(var i=0;i<60;i++) step();  // already measuring when the page opens
+  draw(); size();
+  window.addEventListener('resize',size);
+  // The meter only runs while the demo is on screen.
+  var seen=true;
+  if('IntersectionObserver' in window) new IntersectionObserver(function(es){seen=es[0].isIntersecting}).observe(screen);
+  setInterval(function(){if(seen&&!document.hidden){step();draw()}},100);
 
   // The browser's own confirmation before the package downloads. The version and size are written here by hand:
   // change them with each release (Finder's size, in decimal units).
   var DL={version:'1.1.1',size:'390 KB'};
   document.querySelectorAll('a.dl').forEach(function(a){
     a.addEventListener('click',function(e){
-      var ja=document.body.classList.contains('ja');
+      var ja=document.body.classList.contains('lang-ja');
       var msg=ja
         ?'LUFSBar.pkg（LUFSBar '+DL.version+'・約 '+DL.size+'）をダウンロードしますか？'
         :'Download LUFSBar.pkg (LUFSBar '+DL.version+', about '+DL.size+')?';
